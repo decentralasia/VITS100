@@ -21,10 +21,25 @@ _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜ
 #''' Symbols for en/ko/ja cleaners - from MB-iSTFT-VITS-multilingual
 _pad        = '_'
 _punctuation = '!? ^,;.'
-_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
+
+# Kyrgyz specific letters (includes Ң, Ө, Ү which are specific to Kyrgyz)
+_kyrgyz_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
+
+# Russian letters (standard Russian alphabet without Kyrgyz-specific letters)
+_russian_letters = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя'
+
 _paralinguistics = ["<inhale>", "<exhale>", "<yawn>", "<cough>"]
 
-symbols = [_pad] + list(_punctuation) + list(_letters) + _paralinguistics
+# Create language-prefixed symbols for separate token IDs
+_kyrgyz_symbols = ['<kg>' + c for c in _kyrgyz_letters]
+_russian_symbols = ['<ru>' + c for c in _russian_letters]
+
+# Build complete symbol list
+symbols = [_pad] + list(_punctuation) + _kyrgyz_symbols + _russian_symbols + _paralinguistics
 
 # Special symbol ids
 SPACE_ID = symbols.index(" ")
+
+# Language codes
+KYRGYZ_LANG = 'kg'
+RUSSIAN_LANG = 'ru'
