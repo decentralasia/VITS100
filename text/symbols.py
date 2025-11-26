@@ -26,7 +26,7 @@ _punctuation = '!? ^,;.'
 _kyrgyz_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
 
 # Russian letters (standard Russian alphabet without Kyrgyz-specific letters)
-_russian_letters = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя'
+_russian_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
 
 _paralinguistics = ["<inhale>", "<exhale>", "<yawn>", "<cough>"]
 
