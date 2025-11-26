@@ -31,7 +31,7 @@ _russian_letters = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬ
 _paralinguistics = ["<inhale>", "<exhale>", "<yawn>", "<cough>"]
 
 # Create language-prefixed symbols for separate token IDs
-_kyrgyz_symbols = ['<kg>' + c for c in _kyrgyz_letters]
+_kyrgyz_symbols = ['<ky>' + c for c in _kyrgyz_letters]
 _russian_symbols = ['<ru>' + c for c in _russian_letters]
 
 # Build complete symbol list
@@ -40,6 +40,6 @@ symbols = [_pad] + list(_punctuation) + _kyrgyz_symbols + _russian_symbols + _pa
 # Special symbol ids
 SPACE_ID = symbols.index(" ")
 
-# Language codes
-KYRGYZ_LANG = 'kg'
+# Language codes (note: data files use 'kg' but we convert to 'ky' internally)
+KYRGYZ_LANG = 'ky'
 RUSSIAN_LANG = 'ru'

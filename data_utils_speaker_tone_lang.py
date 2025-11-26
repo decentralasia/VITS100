@@ -75,7 +75,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     def get_audio_text_speaker_tone_lang_pair(self, audiopath_sid_tone_lang_text):
         # separate filename, speaker_id and text
         audiopath, sid, tone, lid, real_text, pronounced_text = audiopath_sid_tone_lang_text
-        text = self.get_text(pronounced_text)
+        text = self.get_text(pronounced_text, lid)
         spec, wav = self.get_audio(audiopath)
         sid = self.get_sid(sid)
         tone_id = self.get_tone_id(tone)
@@ -117,11 +117,15 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
             torch.save(spec, spec_filename)
         return spec, audio_norm
 
-    def get_text(self, text):
+    def get_text(self, text, lid):
+        # Convert language ID string to language code for text_to_sequence
+        # lid can be 'kg' for Kyrgyz or 'ru' for Russian
+        lang_code = 'ky' if lid == 'kg' else lid  # Convert 'kg' to 'ky' for consistency
+
         if self.cleaned_text:
             text_norm = cleaned_text_to_sequence(text)
         else:
-            text_norm = text_to_sequence(text, self.text_cleaners)
+            text_norm = text_to_sequence(text, self.text_cleaners, lang_code)
         if self.add_blank:
             text_norm = commons.intersperse(text_norm, 0)
         text_norm = torch.LongTensor(text_norm)
