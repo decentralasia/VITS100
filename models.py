@@ -25,6 +25,8 @@ from commons import init_weights, get_padding
 from pqmf import PQMF
 from stft import TorchSTFT, OnnxSTFT
 
+from typing import Any, Optional
+
 AVAILABLE_FLOW_TYPES = ["pre_conv", "pre_conv2", "fft", "mono_layer_inter_residual", "mono_layer_post_residual"]
 AVAILABLE_DURATION_DISCRIMINATOR_TYPES = {"dur_disc_1": "DurationDiscriminator", "dur_disc_2": "DurationDiscriminator2"}
 
