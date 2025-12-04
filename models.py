@@ -1483,7 +1483,7 @@ class SynthesizerTrn(nn.Module):
         lang = self.emb_language(lid)  # [B, gin_channels]
 
         # Concatenate all embeddings and project
-        print(spk.shape, tone.shape, lang.shape, reference_emb.shape)
+        reference_emb = reference_emb.squeeze(-1)
         g_cat = torch.cat([spk, tone, lang, reference_emb], dim=1).unsqueeze(-1)  # [B, 3*gin_channels, 1]
 
         g = self.g_proj(g_cat)  # [B, gin_channels, 1]
