@@ -1262,6 +1262,68 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
+class ReferenceEncoder(nn.Module):
+    """
+    inputs --- [N, Ty/r, n_mels*r]  mels
+    outputs --- [N, ref_enc_gru_size]
+    """
+
+    def __init__(self, spec_channels: int, gin_channels: int = 0) -> None:
+        super().__init__()
+        self.spec_channels = spec_channels
+        ref_enc_filters = [32, 32, 64, 64, 128, 128]
+        K = len(ref_enc_filters)
+        filters = [1] + ref_enc_filters
+        convs = [
+            weight_norm(
+                nn.Conv2d(
+                    in_channels=filters[i],
+                    out_channels=filters[i + 1],
+                    kernel_size=(3, 3),
+                    stride=(2, 2),
+                    padding=(1, 1),
+                )
+            )
+            for i in range(K)
+        ]
+        self.convs = nn.ModuleList(convs)
+        # self.wns = nn.ModuleList([weight_norm(num_features=ref_enc_filters[i]) for i in range(K)])
+
+        out_channels = self.calculate_channels(spec_channels, 3, 2, 1, K)
+        self.gru = nn.GRU(
+            input_size=ref_enc_filters[-1] * out_channels,
+            hidden_size=256 // 2,
+            batch_first=True,
+        )
+        self.proj = nn.Linear(128, gin_channels)
+
+    def forward(
+        self, inputs: torch.Tensor, mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        N = inputs.size(0)
+        out = inputs.view(N, 1, -1, self.spec_channels)  # [N, 1, Ty, n_freqs]
+        for conv in self.convs:
+            out = conv(out)
+            # out = wn(out)
+            out = F.relu(out)  # [N, 128, Ty//2^K, n_mels//2^K]
+
+        out = out.transpose(1, 2)  # [N, Ty//2^K, 128, n_mels//2^K]
+        T = out.size(1)
+        N = out.size(0)
+        out = out.contiguous().view(N, T, -1)  # [N, Ty//2^K, 128*n_mels//2^K]
+
+        self.gru.flatten_parameters()
+        memory, out = self.gru(out)  # out --- [1, N, 128]
+
+        return self.proj(out.squeeze(0))
+
+    def calculate_channels(
+        self, L: int, kernel_size: int, stride: int, pad: int, n_convs: int
+    ) -> int:
+        for i in range(n_convs):
+            L = (L - kernel_size + 2 * pad) // stride + 1
+        return L
+
 
 class SynthesizerTrn(nn.Module):
     """
@@ -1400,15 +1462,15 @@ class SynthesizerTrn(nn.Module):
         self.n_tones = n_tones
         self.n_languages = n_languages
         # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
-        self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
-        self.emb_tone = nn.Embedding(n_tones, gin_channels)
-        self.emb_language = nn.Embedding(n_languages, gin_channels)
+        self.emb_speaker = nn.Embedding(n_speakers, gin_channels // 2)
+        self.emb_tone = nn.Embedding(n_tones, gin_channels // 2)
+        self.emb_language = nn.Embedding(n_languages, gin_channels // 2)
 
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
+        self.ref_enc = ReferenceEncoder(spec_channels, gin_channels * 1.5)
 
-
-    def _build_g(self, sid, tid, lid):
+    def _build_g(self, sid, tid, lid, reference_emb):
         """
         Build conditioning vector g with shape [B, gin_channels] using concatenation of
         speaker, tone, and language embeddings. All three embeddings are concatenated
@@ -1419,7 +1481,7 @@ class SynthesizerTrn(nn.Module):
         lang = self.emb_language(lid)  # [B, gin_channels]
 
         # Concatenate all embeddings and project
-        g_cat = torch.cat([spk, tone, lang], dim=1).unsqueeze(-1)  # [B, 3*gin_channels, 1]
+        g_cat = torch.cat([spk, tone, lang, reference_emb], dim=1).unsqueeze(-1)  # [B, 3*gin_channels, 1]
 
         g = self.g_proj(g_cat)  # [B, gin_channels, 1]
         return g
@@ -1427,7 +1489,8 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, y, y_lengths, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        g = self._build_g(sid=sid, tid=tid, lid=lid)
+        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
@@ -1483,7 +1546,8 @@ class SynthesizerTrn(nn.Module):
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
     def infer(self, x, x_lengths, sid=None, tid=None, lid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
-        g = self._build_g(sid=sid, tid=tid, lid=lid)
+        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
         if self.use_sdp:

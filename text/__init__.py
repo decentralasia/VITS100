@@ -53,7 +53,7 @@ def text_to_sequence(text, cleaner_names, lang_code=None):
     Args:
       text: string to convert to a sequence
       cleaner_names: names of the cleaner functions to run the text through
-      lang_code: language code ('ky' for Kyrgyz, 'ru' for Russian).
+      lang_code: language code ('ky' for Kyrgyz, 'ru' for Russian). 
                  If None, text must already have language prefixes or contain no alphabetic characters.
     Returns:
       List of integers corresponding to the symbols in the text

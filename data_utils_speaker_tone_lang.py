@@ -121,7 +121,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         # Convert language ID string to language code for text_to_sequence
         # lid can be 'kg' for Kyrgyz or 'ru' for Russian
         lang_code = 'ky' if lid == 'kg' else lid  # Convert 'kg' to 'ky' for consistency
-
+        
         if self.cleaned_text:
             text_norm = cleaned_text_to_sequence(text)
         else:
