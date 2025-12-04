@@ -1470,7 +1470,7 @@ class SynthesizerTrn(nn.Module):
 
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
-        self.ref_enc = ReferenceEncoder(spec_channels, gin_channels * 1.5)
+        self.ref_enc = ReferenceEncoder(spec_channels, int(gin_channels * 1.5))
 
     def _build_g(self, sid, tid, lid, reference_emb):
         """
