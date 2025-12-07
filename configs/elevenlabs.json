@@ -35,17 +35,17 @@
       "mel_fmax": null,
       "add_blank": true,
 
-      "n_speakers": 2,
-      "n_tones": 3,
-      "n_languages": 2,
+      "n_speakers": 1,
+      "n_tones": 1,
+      "n_languages": 1,
 
       "cleaned_text": false
     },
     "model": {
       "gin_channels": 128,
-      "n_speakers": 2,
-      "n_tones": 3,
-      "n_languages": 2,
+      "n_speakers": 1,
+      "n_tones": 1,
+      "n_languages": 1,
 
       "monotonic_align": "ma",
       "use_mel_posterior_encoder": true,
