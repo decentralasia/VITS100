@@ -22,7 +22,7 @@
     },
     "data": {
       "use_mel_posterior_encoder": true,
-      "training_files":"DUMMY_1/timur_neutral_dummy1.txt",
+      "training_files":"DUMMY1/timur_neutral_dummy1.txt",
       "validation_files":"DUMMY_ELEVENLABS/val_elevenlabs_timur_neutral.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
