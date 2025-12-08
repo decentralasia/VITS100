@@ -4,7 +4,7 @@
       "eval_interval": 200,
       "seed": 1234,
       "epochs": 20000,
-      "learning_rate": 1e-5,
+      "learning_rate": 1e-6,
       "betas": [0.8, 0.99],
       "eps": 1e-9,
       "batch_size": 40,
@@ -22,7 +22,7 @@
     },
     "data": {
       "use_mel_posterior_encoder": true,
-      "training_files":"DUMMY_ELEVENLABS/train_elevenlabs_timur_neutral.txt",
+      "training_files":"DUMMY_1/timur_neutral_dummy1.txt",
       "validation_files":"DUMMY_ELEVENLABS/val_elevenlabs_timur_neutral.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
