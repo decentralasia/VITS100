@@ -1548,8 +1548,12 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, x_lengths, sid=None, tid=None, lid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
-        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+    def infer(self, x, x_lengths, y=None, sid=None, tid=None, lid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
+        if y is not None:
+            reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        else:
+            # Use a zero embedding if no reference audio is provided
+            reference_emb = torch.zeros(x.size(0), int(self.gin_channels * 1.5), device=x.device, dtype=x.dtype)
         g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
