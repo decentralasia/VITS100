@@ -66,8 +66,8 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         audiopaths_sid_tone_lang_text_new = []
         lengths = []
         for audiopath, sid, tone_id, lid, real_text, text in self.audiopaths_sid_tone_lang_text:
+            print(len(text), text)
             if self.min_text_len <= len(text) <= self.max_text_len:
-                print(len(text), text)
                 audiopaths_sid_tone_lang_text_new.append([audiopath, sid, tone_id, lid, real_text, text])
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
         self.audiopaths_sid_tone_lang_text = audiopaths_sid_tone_lang_text_new
