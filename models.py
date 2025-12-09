@@ -1464,12 +1464,12 @@ class SynthesizerTrn(nn.Module):
         self.n_tones = n_tones
         self.n_languages = n_languages
         # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
-        self.emb_speaker = nn.Embedding(n_speakers, gin_channels // 2)
-        self.emb_tone = nn.Embedding(n_tones, gin_channels // 2)
-        self.emb_language = nn.Embedding(n_languages, gin_channels // 2)
-
-        # Project concatenated embeddings back to gin_channels
-        self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
+        # self.emb_speaker = nn.Embedding(n_speakers, gin_channels // 2)
+        # self.emb_tone = nn.Embedding(n_tones, gin_channels // 2)
+        # self.emb_language = nn.Embedding(n_languages, gin_channels // 2)
+        #
+        # # Project concatenated embeddings back to gin_channels
+        # self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
         self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
 
     def _build_g(self, sid, tid, lid, reference_emb):
