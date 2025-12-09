@@ -1470,7 +1470,7 @@ class SynthesizerTrn(nn.Module):
 
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
-        self.ref_enc = ReferenceEncoder(spec_channels, int(gin_channels * 1.5))
+        self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
 
     def _build_g(self, sid, tid, lid, reference_emb):
         """
@@ -1493,7 +1493,13 @@ class SynthesizerTrn(nn.Module):
     def forward(self, x, x_lengths, y, y_lengths, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
         reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+
+        # Option 1: Use reference_emb directly as g (current approach)
+        g = reference_emb
+
+        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings (commented out)
+        # g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
@@ -1553,8 +1559,13 @@ class SynthesizerTrn(nn.Module):
             reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
         else:
             # Use a zero embedding if no reference audio is provided
-            reference_emb = torch.zeros(x.size(0), int(self.gin_channels * 1.5), device=x.device, dtype=x.dtype)
-        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+            reference_emb = torch.zeros(x.size(0), self.gin_channels, device=x.device, dtype=x.dtype).unsqueeze(-1)
+
+        # Option 1: Use reference_emb directly as g (current approach)
+        g = reference_emb
+
+        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings (commented out)
+        # g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
         if self.use_sdp:
