@@ -112,11 +112,11 @@ def run(rank, n_gpus, hps):
         shuffle=True)
 
     collate_fn = TextAudioSpeakerToneLangCollate()
-    train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
+    train_loader = DataLoader(train_dataset, num_workers=8, shuffle=True, pin_memory=True,
                               collate_fn=collate_fn, batch_sampler=train_sampler)
     if rank == 0:
         eval_dataset = TextAudioSpeakerToneLangLoader(hps.data.validation_files, hps.data)
-        eval_loader = DataLoader(eval_dataset, num_workers=1, shuffle=False,
+        eval_loader = DataLoader(eval_dataset, num_workers=1, shuffle=True,
                                  batch_size=hps.train.batch_size, pin_memory=True,
                                  drop_last=False, collate_fn=collate_fn)
     # some of these flags are not being used in the code and directly set in hps json file.

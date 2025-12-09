@@ -37,7 +37,7 @@ class TextAudioLoader(torch.utils.data.Dataset):
         self.min_text_len = getattr(hparams, "min_text_len", 1)
         self.max_text_len = getattr(hparams, "max_text_len", 190)
 
-        random.seed(1234)
+        # random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
         self._filter()
 
@@ -197,7 +197,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.max_text_len = getattr(hparams, "max_text_len", 190)
         # self.min_audio_len = getattr(hparams, "min_audio_len", 8192)
 
-        random.seed(1234)
+        # random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
 
@@ -391,7 +391,7 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
     def __iter__(self):
       # deterministically shuffle based on epoch
       g = torch.Generator()
-      g.manual_seed(self.epoch)
+      # g.manual_seed(self.epoch)
   
       indices = []
       if self.shuffle:
