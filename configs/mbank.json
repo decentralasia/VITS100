@@ -22,7 +22,7 @@
     },
     "data": {
       "use_mel_posterior_encoder": true,
-      "training_files":"combined_train2.txt",
+      "training_files":"combined_train.txt",
       "validation_files":"DUMMY1/val_filtered_manifest.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
