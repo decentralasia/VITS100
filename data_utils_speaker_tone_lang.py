@@ -65,12 +65,60 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
         audiopaths_sid_tone_lang_text_new = []
         lengths = []
+
+        # Statistics tracking
+        original_count = len(self.audiopaths_sid_tone_lang_text)
+        filtered_too_short = 0
+        filtered_too_long = 0
+        filtered_missing_file = 0
+        accepted_count = 0
+
         for audiopath, sid, tone_id, lid, real_text, text in self.audiopaths_sid_tone_lang_text:
-            if self.min_text_len <= len(text) <= self.max_text_len:
+            text_len = len(text)
+
+            # Check text length
+            if text_len < self.min_text_len:
+                filtered_too_short += 1
+                continue
+            elif text_len > self.max_text_len:
+                filtered_too_long += 1
+                continue
+
+            # Check if audio file exists
+            if not os.path.exists(audiopath):
+                filtered_missing_file += 1
+                continue
+
+            # Try to get file size (will fail silently if file is inaccessible)
+            try:
+                file_size = os.path.getsize(audiopath)
+                if file_size == 0:
+                    filtered_missing_file += 1
+                    continue
+
                 audiopaths_sid_tone_lang_text_new.append([audiopath, sid, tone_id, lid, real_text, text])
-                lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
+                lengths.append(file_size // (2 * self.hop_length))
+                accepted_count += 1
+            except (OSError, PermissionError):
+                filtered_missing_file += 1
+                continue
+
         self.audiopaths_sid_tone_lang_text = audiopaths_sid_tone_lang_text_new
         self.lengths = lengths
+
+        # Print statistics
+        filtered_count = original_count - accepted_count
+        print(f"\n{'='*60}")
+        print(f"Dataset Filtering Statistics")
+        print(f"{'='*60}")
+        print(f"Original entries:              {original_count}")
+        print(f"Accepted entries:              {accepted_count} ({accepted_count/original_count*100:.1f}%)")
+        print(f"Filtered out:                  {filtered_count} ({filtered_count/original_count*100:.1f}%)")
+        print(f"\nFiltering breakdown:")
+        print(f"  - Too short (< {self.min_text_len}):      {filtered_too_short}")
+        print(f"  - Too long (> {self.max_text_len}):       {filtered_too_long}")
+        print(f"  - Missing/invalid file:      {filtered_missing_file}")
+        print(f"{'='*60}\n")
 
     def get_audio_text_speaker_tone_lang_pair(self, audiopath_sid_tone_lang_text):
         # separate filename, speaker_id and text
