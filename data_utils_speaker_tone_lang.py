@@ -34,7 +34,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
         self.add_blank = hparams.add_blank
         self.min_text_len = getattr(hparams, "min_text_len", 1)
-        self.max_text_len = getattr(hparams, "max_text_len", 190)
+        self.max_text_len = getattr(hparams, "max_text_len", 300)
 
         # random.seed(1234)
         random.shuffle(self.audiopaths_sid_tone_lang_text)
