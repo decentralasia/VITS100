@@ -64,6 +64,7 @@ def text_to_sequence(text, cleaner_names, lang_code=None):
   clean_text = tokenize_pronounced_text(clean_text, lang_code)
   for symbol in clean_text:
     if symbol not in _symbol_to_id.keys():
+      print(text)
       raise ValueError("Not found symbol: {} (lang_code: {})".format(symbol, lang_code))
     symbol_id = _symbol_to_id[symbol]
     sequence += [symbol_id]
