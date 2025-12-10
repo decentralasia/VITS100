@@ -8,6 +8,7 @@ This script checks:
 
 import os
 import argparse
+import wave
 from utils import load_filepaths_and_text
 
 
@@ -43,6 +44,10 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
     spec_exists = 0
     spec_missing = 0
     
+    # Track audio lengths (in seconds) for files with/without mel.pt
+    audio_lengths_with_mel = []
+    audio_lengths_without_mel = []
+
     filtered_entries = []
     filtered_out_details = []
     
@@ -78,6 +83,16 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
         filtered_in += 1
         filtered_entries.append(entry)
         
+        # Get audio file length
+        audio_length = None
+        try:
+            with wave.open(audiopath, 'rb') as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                audio_length = frames / float(rate)  # duration in seconds
+        except Exception as e:
+            print(f"Warning: Could not read audio length for {audiopath}: {e}")
+
         # Check if spec file exists
         spec_filename = audiopath.replace(".wav", ".spec.pt")
         if use_mel_posterior:
@@ -85,9 +100,13 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
         
         if os.path.exists(spec_filename):
             spec_exists += 1
+            if audio_length is not None:
+                audio_lengths_with_mel.append(audio_length)
         else:
             spec_missing += 1
-    
+            if audio_length is not None:
+                audio_lengths_without_mel.append(audio_length)
+
     # Print results
     print("FILTERING RESULTS:")
     print("-"*80)
@@ -100,7 +119,7 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
     print(f"  - Too long (> {max_text_len}):         {too_long}")
     print(f"  - Missing audio file:           {missing_audio}")
     print()
-    
+
     print("SPECTROGRAM FILES:")
     print("-"*80)
     print(f"Spec files exist:                 {spec_exists} ({spec_exists/filtered_in*100:.1f}% of valid)")
@@ -110,6 +129,45 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
     if spec_missing > 0:
         print(f"Note: {spec_missing} spec files will be generated during training")
     
+    # Print audio length statistics
+    if audio_lengths_with_mel or audio_lengths_without_mel:
+        print()
+        print("AUDIO LENGTH STATISTICS:")
+        print("-"*80)
+
+        if audio_lengths_with_mel:
+            total_duration_with = sum(audio_lengths_with_mel)
+            avg_duration_with = total_duration_with / len(audio_lengths_with_mel)
+            print(f"Files WITH mel.pt ({len(audio_lengths_with_mel)} files):")
+            print(f"  - Total duration:  {total_duration_with:.2f} seconds ({total_duration_with/60:.2f} minutes)")
+            print(f"  - Average length:  {avg_duration_with:.2f} seconds")
+            print(f"  - Min length:      {min(audio_lengths_with_mel):.2f} seconds")
+            print(f"  - Max length:      {max(audio_lengths_with_mel):.2f} seconds")
+
+        if audio_lengths_without_mel:
+            total_duration_without = sum(audio_lengths_without_mel)
+            avg_duration_without = total_duration_without / len(audio_lengths_without_mel)
+            print(f"\nFiles WITHOUT mel.pt ({len(audio_lengths_without_mel)} files):")
+            print(f"  - Total duration:  {total_duration_without:.2f} seconds ({total_duration_without/60:.2f} minutes)")
+            print(f"  - Average length:  {avg_duration_without:.2f} seconds")
+            print(f"  - Min length:      {min(audio_lengths_without_mel):.2f} seconds")
+            print(f"  - Max length:      {max(audio_lengths_without_mel):.2f} seconds")
+
+        if audio_lengths_with_mel and audio_lengths_without_mel:
+            print(f"\nComparison:")
+            avg_with = sum(audio_lengths_with_mel) / len(audio_lengths_with_mel)
+            avg_without = sum(audio_lengths_without_mel) / len(audio_lengths_without_mel)
+            diff = avg_without - avg_with
+            print(f"  - Average difference: {abs(diff):.2f} seconds")
+            if diff > 0:
+                print(f"  - Files without mel.pt are on average LONGER")
+            elif diff < 0:
+                print(f"  - Files with mel.pt are on average LONGER")
+            else:
+                print(f"  - No significant difference in average length")
+
+        print()
+
     # Show some filtered out examples
     if filtered_out > 0:
         print()
@@ -147,7 +205,7 @@ def main():
                         help='Maximum text length (default: 190)')
     parser.add_argument('--use_mel', action='store_true',
                         help='Check for .mel.pt files instead of .spec.pt')
-    
+
     args = parser.parse_args()
     
     check_dataset_statistics(
