@@ -12,6 +12,27 @@ import wave
 from utils import load_filepaths_and_text
 
 
+def check_audio_file(audiopath):
+    """
+    Check if audio file exists, is accessible, and has valid size.
+
+    Returns:
+        tuple: (is_valid: bool, error_reason: str or None, file_size: int or None)
+    """
+    if not os.path.exists(audiopath):
+        return False, "file_not_found", None
+
+    try:
+        size = os.path.getsize(audiopath)
+        if size == 0:
+            return False, "empty_file", 0
+        return True, None, size
+    except PermissionError:
+        return False, "permission_denied", None
+    except Exception as e:
+        return False, f"access_error: {str(e)}", None
+
+
 def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, use_mel_posterior=True):
     """
     Check dataset statistics including filtering and mel.pt file existence
@@ -41,12 +62,19 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
     too_long = 0
     missing_audio = 0
     
+    # Track missing audio reasons
+    missing_audio_reasons = {}
+
     spec_exists = 0
     spec_missing = 0
     
     # Track audio lengths (in seconds) for files with/without mel.pt
     audio_lengths_with_mel = []
     audio_lengths_without_mel = []
+
+    # Track file sizes
+    total_audio_size = 0
+    valid_audio_count = 0
 
     filtered_entries = []
     filtered_out_details = []
@@ -60,13 +88,21 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
         text = entry[-1]  # Text is the last element
         text_len = len(text)
         
-        # Check if audio file exists
-        if not os.path.exists(audiopath):
+        # Check if audio file exists and is accessible
+        audio_valid, audio_error, file_size = check_audio_file(audiopath)
+        if not audio_valid:
             missing_audio += 1
             filtered_out += 1
-            filtered_out_details.append((audiopath, text_len, "missing_audio"))
+            filtered_out_details.append((audiopath, text_len, audio_error))
+            # Track reason for missing audio
+            missing_audio_reasons[audio_error] = missing_audio_reasons.get(audio_error, 0) + 1
             continue
         
+        # Track file size for valid audio
+        if file_size is not None:
+            total_audio_size += file_size
+            valid_audio_count += 1
+
         # Check text length filtering
         if text_len < min_text_len:
             too_short += 1
@@ -117,8 +153,24 @@ def check_dataset_statistics(filelist_path, min_text_len=1, max_text_len=190, us
     print("Filtering breakdown:")
     print(f"  - Too short (< {min_text_len}):        {too_short}")
     print(f"  - Too long (> {max_text_len}):         {too_long}")
-    print(f"  - Missing audio file:           {missing_audio}")
+    print(f"  - Missing/invalid audio:        {missing_audio}")
+
+    if missing_audio_reasons:
+        print(f"\n  Missing audio breakdown:")
+        for reason, count in sorted(missing_audio_reasons.items(), key=lambda x: x[1], reverse=True):
+            print(f"    • {reason}: {count} ({count/missing_audio*100:.1f}%)")
     print()
+
+    # Show audio file size statistics
+    if valid_audio_count > 0:
+        avg_size = total_audio_size / valid_audio_count
+        total_size_mb = total_audio_size / (1024 * 1024)
+        total_size_gb = total_size_mb / 1024
+        print(f"Valid audio files statistics:")
+        print(f"  - Total files:     {valid_audio_count}")
+        print(f"  - Total size:      {total_size_mb:.2f} MB ({total_size_gb:.2f} GB)")
+        print(f"  - Average size:    {avg_size / 1024:.2f} KB")
+        print()
 
     print("SPECTROGRAM FILES:")
     print("-"*80)
