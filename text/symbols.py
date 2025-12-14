@@ -20,7 +20,7 @@ _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜ
 
 #''' Symbols for en/ko/ja cleaners - from MB-iSTFT-VITS-multilingual
 _pad        = '_'
-_punctuation = '!? ^,;.'
+_punctuation = '!? ^,;.-'
 
 # Kyrgyz specific letters (includes Ң, Ө, Ү which are specific to Kyrgyz)
 _kyrgyz_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
