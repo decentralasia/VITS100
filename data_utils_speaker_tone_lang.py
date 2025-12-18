@@ -10,6 +10,7 @@ from mel_processing import spectrogram_torch, mel_spectrogram_torch, spec_to_mel
 from utils import load_wav_to_torch_2, load_filepaths_and_text
 from text import text_to_sequence, cleaned_text_to_sequence
 
+from collections import defaultdict
 
 class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     """
