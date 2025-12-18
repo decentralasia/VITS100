@@ -199,6 +199,14 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         print(index)
+        print(index)
+        print(index)
+        print(index)
+        print(index)
+        print(index)
+        print(index)
+        print(index)
+        print(index)
         return self.get_audio_text_speaker_tone_lang_pair(self.audiopaths_sid_tone_lang_text[index])
 
     def __len__(self):
