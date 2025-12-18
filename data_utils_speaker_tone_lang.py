@@ -97,6 +97,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
                 print("kotok")
                 print("kotok")
                 print("kotok")
+                print(filtered_missing_file)
                 filtered_missing_file += 1
                 continue
 
