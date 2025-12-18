@@ -180,33 +180,24 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         return text_norm
 
     def get_sid(self, sid):
-        sid = self.speaker_dict[sid]
+        # sid = self.speaker_dict[sid]
         sid = 0
         sid = torch.LongTensor([int(sid)])
         return sid
 
     def get_tone_id(self, tone):
-        tone_id = self.tone_dict[tone]
+        # tone_id = self.tone_dict[tone]
         tone_id = 0
         tone_id = torch.LongTensor([int(tone_id)])
         return tone_id
 
     def get_lid(self, lid):
-        l_id = self.language_dict[lid]
+        # l_id = self.language_dict[lid]
         l_id = 0
         l_id = torch.LongTensor([int(l_id)])
         return l_id
 
     def __getitem__(self, index):
-        print(index)
-        print(index)
-        print(index)
-        print(index)
-        print(index)
-        print(index)
-        print(index)
-        print(index)
-        print(index)
         return self.get_audio_text_speaker_tone_lang_pair(self.audiopaths_sid_tone_lang_text[index])
 
     def __len__(self):
