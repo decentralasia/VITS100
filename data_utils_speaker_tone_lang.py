@@ -40,19 +40,23 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         random.shuffle(self.audiopaths_sid_tone_lang_text)
         self._filter()
 
-        self.speaker_dict = {
+        self.speaker_dict = defaultdict(lambda :0)
+        self.tone_dict = defaultdict(lambda :0)
+        self.language_dict = defaultdict(lambda :0)
+
+        self.speaker_dict.update({
             "Timur": 0,
             "Aiganysh": 1,
-        }
-        self.tone_dict = {
+        })
+        self.tone_dict.update({
             "neutral": 0,
             "strict": 1,
             "friendly": 2,
-        }
-        self.language_dict = {
+        })
+        self.language_dict.update({
             "kg": 0,
             "ru": 1,
-        }
+        })
         self.hparams = hparams
 
     def _filter(self):
