@@ -183,7 +183,6 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         # sid = self.speaker_dict[sid]
         sid = 0
         sid = torch.LongTensor([int(sid)])
-        print(sid)
         return sid
 
     def get_tone_id(self, tone):
