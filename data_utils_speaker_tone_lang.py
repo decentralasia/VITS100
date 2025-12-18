@@ -79,7 +79,6 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         accepted_count = 0
 
         for audiopath, sid, tone_id, lid, real_text, text in self.audiopaths_sid_tone_lang_text:
-            print(audiopath)
             text_len = len(text)
 
             # Check text length
