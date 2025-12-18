@@ -92,12 +92,6 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
             # Check if audio file exists
             if not os.path.exists(audiopath):
-                print("kotok")
-                print("kotok")
-                print("kotok")
-                print("kotok")
-                print("kotok")
-                print(filtered_missing_file)
                 filtered_missing_file += 1
                 continue
 
@@ -110,6 +104,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
                 audiopaths_sid_tone_lang_text_new.append([audiopath, sid, tone_id, lid, real_text, text])
                 lengths.append(file_size // (2 * self.hop_length))
+                print(audiopaths_sid_tone_lang_text_new[accepted_count])
                 accepted_count += 1
             except (OSError, PermissionError):
                 filtered_missing_file += 1
