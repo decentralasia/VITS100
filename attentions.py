@@ -260,15 +260,12 @@ class MultiHeadAttention(nn.Module):
 
   def _get_relative_embeddings(self, relative_embeddings, length):
     max_relative_position = 2 * self.window_size + 1
-    # Always pad to make the operation ONNX-traceable (avoid conditional branches)
-    # Calculate pad_length and slice positions using Python integers (not tensors)
-    # Since length comes from tensor.size(), it's already a Python int
-    pad_length = length - (self.window_size + 1)
-    if pad_length < 0:
-      pad_length = 0
-    slice_start_position = (self.window_size + 1) - length
-    if slice_start_position < 0:
-      slice_start_position = 0
+    # Ensure length is a Python int (not a tensor) by using int()
+    # tensor.size() returns Python int, but be explicit for safety
+    length = int(length)
+    # Use max() directly to avoid if-statements that cause TracerWarnings
+    pad_length = max(length - (self.window_size + 1), 0)
+    slice_start_position = max((self.window_size + 1) - length, 0)
     slice_end_position = slice_start_position + 2 * length - 1
     # Always apply padding (even if pad_length is 0, this is a no-op)
     padded_relative_embeddings = F.pad(
