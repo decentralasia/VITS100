@@ -1024,13 +1024,16 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         else:
             self.stft = TorchSTFT(filter_length=self.gen_istft_n_fft, hop_length=self.gen_istft_hop_size, win_length=self.gen_istft_n_fft)
 
+        # Initialize PQMF in __init__ to avoid TracerWarning during ONNX export
+        self.pqmf = PQMF('cpu', subbands=subbands)
+
     def forward(self, x, g=None):
         '''
         stft = TorchSTFT(filter_length=self.gen_istft_n_fft, hop_length=self.gen_istft_hop_size,
                          win_length=self.gen_istft_n_fft).to(x.device) # !
         '''
         stft = self.stft.to(x.device)
-        pqmf = PQMF(x.device)
+        pqmf = self.pqmf.to(x.device)
 
         x = self.conv_pre(x)  # [B, ch, length]
 
