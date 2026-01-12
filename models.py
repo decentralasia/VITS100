@@ -19,8 +19,14 @@ except:
     print("Could not import S_monotonic_align_Triton")
 
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
-from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
+from torch.nn.utils.parametrizations import weight_norm
+from torch.nn.utils.parametrize import remove_parametrizations
+from torch.nn.utils import spectral_norm
 from commons import init_weights, get_padding
+
+# Helper function to remove weight_norm using new parametrizations API
+def remove_weight_norm(module, name='weight'):
+    return remove_parametrizations(module, name)
 
 from pqmf import PQMF
 from stft import TorchSTFT, OnnxSTFT
