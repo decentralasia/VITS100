@@ -15,7 +15,6 @@ from torch.utils.data import DataLoader
 
 import commons
 import utils
-from data_utils_multispeker_multitone import TextAudioSpeakerToneLoader, TextAudioSpeakerToneCollate
 from models import SynthesizerTrn
 from text.symbols import symbols
 
@@ -26,29 +25,17 @@ from scipy import signal
 
 
 #- Variable section
-PATH_TO_CONFIG = "/data/kenenbek/VITS100/logs/mbank/config.json"
-PATH_TO_MODEL = "/data/kenenbek/VITS100/logs/mbank/G_174600.pth"
-SPEAKER_ID = 0  # Changed from None to 0
-TONE_ID = 0  # Changed from None to 0
-SCALE_CONFIG = torch.FloatTensor([0.667, 1.0, 0.8]) # scales -> noise, noise_w, length
+PATH_TO_CONFIG = "/mnt/d/super_last/config.json"
+PATH_TO_MODEL = "/mnt/d/super_last/G_690000.pth"
 OPSET_VERSION = 15
-
+posterior_channels = 80
 
 hps = utils.get_hparams_from_file(PATH_TO_CONFIG)
 
-if "use_mel_posterior_encoder" in hps.model.keys() and hps.model.use_mel_posterior_encoder == True:
-    print("Using mel posterior encoder for VITS2")
-    posterior_channels = 80  # vits2
-    hps.data.use_mel_posterior_encoder = True
-else:
-    print("Using lin posterior encoder for VITS1")
-    posterior_channels = hps.data.filter_length // 2 + 1
-    hps.data.use_mel_posterior_encoder = False
-
 net_g = SynthesizerTrn(
     len(symbols),
-    posterior_channels,
-    hps.train.segment_size // hps.data.hop_length,
+    spec_channels=posterior_channels,
+    segment_size=hps.train.segment_size // hps.data.hop_length,
     is_onnx=True, # !
     **hps.model)
 
@@ -58,18 +45,20 @@ num_symbols = net_g.n_vocab
 num_speakers = net_g.n_speakers
 
 
-def infer_forward(text, text_lengths, scales, sid, tid):
+def infer_forward(text, text_lengths, spec_ref, scales, sid, tid, lid):
     noise_scale = scales[0]
     length_scale = scales[1]
     noise_scale_w = scales[2]
     audio = net_g.infer(
             text,
             text_lengths,
+            spec_ref,
             noise_scale=noise_scale,
             length_scale=length_scale,
             noise_scale_w=noise_scale_w,
             sid=sid,
             tid=tid,
+            lid=lid,
     )[0].unsqueeze(1)
 
     return audio
@@ -85,9 +74,13 @@ net_g.eval()
 # dummy initialization
 dmy_text = torch.randint(low=0, high=num_symbols, size=(1, 50), dtype=torch.long)
 dmy_text_length = torch.LongTensor([dmy_text.size(1)])
-dmy_sid = torch.LongTensor([SPEAKER_ID])
-dmy_tid = torch.LongTensor([TONE_ID])
-dummy_input = (dmy_text, dmy_text_length, SCALE_CONFIG, dmy_sid, dmy_tid) # infer_forward()
+dmy_sid = torch.LongTensor([0])
+dmy_tid = torch.LongTensor([0])
+dmy_lid = torch.LongTensor([0])
+scale_config = torch.FloatTensor([0.667, 1.0, 0.8]) # scales -> noise, noise_w, length
+batch_size = 1
+spec_ref= torch.rand(batch_size, posterior_channels, 77, dtype=torch.float32)
+dummy_input = (dmy_text, dmy_text_length, spec_ref, scale_config, dmy_sid, dmy_tid, dmy_lid)
 
 
 # Export
@@ -95,9 +88,9 @@ torch.onnx.export(
         model=net_g,
         args=dummy_input,
         f="model.onnx",
-        verbose=True,
+        verbose=False,
         opset_version=OPSET_VERSION,
-        input_names=["input", "input_lengths", "scales", "sid", "tid"],
+        input_names=["input", "input_lengths", "spec_ref", "scales", "sid", "tid", "lid"],
         output_names=["output"],
         dynamic_axes={
             "input": {0: "batch_size", 1: "phonemes"},

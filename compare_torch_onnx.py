@@ -11,8 +11,8 @@ from text.symbols import symbols
 from text import text_to_sequence
 
 # Configuration
-PATH_TO_CONFIG = "/mnt/d/VITS100/mbank/config.json"
-PATH_TO_MODEL = "/mnt/d/VITS100/mbank/G_64000.pth"
+PATH_TO_CONFIG = "/mnt/d/super_last/config.json"
+PATH_TO_MODEL = "/mnt/d/super_last/G_690000.pth"
 PATH_TO_ONNX = "model.onnx"
 INPUT_TEXT = "бишкек"
 OUTPUT_DIR = "comparison_outputs"
