@@ -10,7 +10,6 @@ from mel_processing import spectrogram_torch, mel_spectrogram_torch, spec_to_mel
 from utils import load_wav_to_torch_2, load_filepaths_and_text
 from text import text_to_sequence, cleaned_text_to_sequence
 
-
 class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     """
         1) loads audio, speaker_id, tone, text pairs
@@ -40,6 +39,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         random.shuffle(self.audiopaths_sid_tone_lang_text)
         self._filter()
 
+        # Use regular dicts instead of defaultdict with lambda (lambdas can't be pickled for multiprocessing)
         self.speaker_dict = {
             "Timur": 0,
             "Aiganysh": 1,
@@ -180,17 +180,20 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         return text_norm
 
     def get_sid(self, sid):
-        sid = self.speaker_dict[sid]
+        # sid = self.speaker_dict[sid]
+        sid = 0
         sid = torch.LongTensor([int(sid)])
         return sid
 
     def get_tone_id(self, tone):
-        tone_id = self.tone_dict[tone]
+        # tone_id = self.tone_dict[tone]
+        tone_id = 0
         tone_id = torch.LongTensor([int(tone_id)])
         return tone_id
 
     def get_lid(self, lid):
-        l_id = self.language_dict[lid]
+        # l_id = self.language_dict[lid]
+        l_id = 0
         l_id = torch.LongTensor([int(l_id)])
         return l_id
 

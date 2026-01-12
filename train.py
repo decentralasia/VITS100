@@ -50,7 +50,7 @@ def main():
 
     n_gpus = torch.cuda.device_count()
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6060'
+    os.environ['MASTER_PORT'] = '6066'
 
     hps = utils.get_hparams()
     mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
@@ -106,7 +106,8 @@ def run(rank, n_gpus, hps):
     train_sampler = DistributedBucketSampler(
         train_dataset,
         hps.train.batch_size,
-        [371, 489, 605, 714, 831, 954, 1092, 1251, 1452, 1706, 3885],
+        #[371, 489, 605, 714, 831, 954, 1092, 1251, 1452, 1706, 3885],
+        [654, 814, 994, 1168, 1346, 1547, 1735, 1907, 2273],
         num_replicas=n_gpus,
         rank=rank,
         shuffle=True)
