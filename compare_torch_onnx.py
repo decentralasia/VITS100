@@ -15,6 +15,7 @@ PATH_TO_CONFIG = "/mnt/d/super_last/config.json"
 PATH_TO_MODEL = "/mnt/d/super_last/G_690000.pth"
 PATH_TO_ONNX = "model.onnx"
 INPUT_TEXT = "бишкек"
+INPUT_LANG = "ky"  # Language code: 'ky' for Kyrgyz, 'ru' for Russian
 OUTPUT_DIR = "comparison_outputs"
 posterior_channels = 80  # Must match the ONNX export configuration
 
@@ -53,14 +54,14 @@ for inp in ort_session.get_inputs():
 print()
 
 # Prepare text
-def get_text(text, hps):
-    text_norm = text_to_sequence(text, hps.data.text_cleaners)
+def get_text(text, hps, lang_code=None):
+    text_norm = text_to_sequence(text, hps.data.text_cleaners, lang_code=lang_code)
     if hps.data.add_blank:
         text_norm = commons.intersperse(text_norm, 0)
     text_norm = torch.LongTensor(text_norm)
     return text_norm
 
-stn_tst = get_text(INPUT_TEXT, hps)
+stn_tst = get_text(INPUT_TEXT, hps, lang_code=INPUT_LANG)
 x_tst = stn_tst.to(device).unsqueeze(0)
 x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).to(device)
 
