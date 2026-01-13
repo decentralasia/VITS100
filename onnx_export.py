@@ -1,14 +1,9 @@
 ### from @nshmyrev's fork :  https://github.com/alphacep/MB-iSTFT-VITS2/blob/main/export.py
 
 import warnings
-import torch
-
 # Suppress ONNX export warnings that don't affect model correctness
 warnings.filterwarnings("ignore", message="Exporting a model to ONNX with a batch_size other than 1")
 warnings.filterwarnings("ignore", message="Constant folding - Only steps=1 can be constant folded")
-warnings.filterwarnings("ignore", message="Converting a tensor to a Python boolean")
-warnings.filterwarnings("ignore", message="Converting a tensor to a Python integer")
-warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
 
 import librosa
 import matplotlib.pyplot as plt
@@ -18,6 +13,7 @@ import json
 import math
 
 import requests
+import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
