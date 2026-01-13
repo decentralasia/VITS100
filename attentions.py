@@ -260,7 +260,9 @@ class MultiHeadAttention(nn.Module):
 
   def _get_relative_embeddings(self, relative_embeddings, length):
     max_relative_position = 2 * self.window_size + 1
-    # length comes from tensor.size() which already returns a Python int
+    # Ensure length is a Python int (not a tensor) by using int()
+    # tensor.size() returns Python int, but be explicit for safety
+    length = int(length)
     # Use max() directly to avoid if-statements that cause TracerWarnings
     pad_length = max(length - (self.window_size + 1), 0)
     slice_start_position = max((self.window_size + 1) - length, 0)
