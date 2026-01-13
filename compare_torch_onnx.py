@@ -71,9 +71,11 @@ spec_ref_length = 77  # Same as used in onnx_export.py
 spec_ref = torch.rand(1, posterior_channels, spec_ref_length, dtype=torch.float32).to(device)
 
 # Test configurations: (sid, tid, lid)
-# Note: ONNX model doesn't use these - they are for PyTorch comparison only
 configs = [
     (0, 0, 0),
+    (0, 1, 0),
+    (1, 0, 0),
+    (1, 1, 0),
 ]
 
 scales = torch.FloatTensor([0.667, 1.0, 0.8])
@@ -84,26 +86,27 @@ print()
 
 # Generate with PyTorch
 print("=== PyTorch Generation ===")
-sid_tensor = torch.LongTensor([0]).to(device)
-tid_tensor = torch.LongTensor([0]).to(device)
-lid_tensor = torch.LongTensor([0]).to(device)
+for sid, tid, lid in configs:
+    sid_tensor = torch.LongTensor([sid]).to(device)
+    tid_tensor = torch.LongTensor([tid]).to(device)
+    lid_tensor = torch.LongTensor([lid]).to(device)
 
-with torch.no_grad():
-    audio = net_g.infer(
-        x_tst,
-        x_tst_lengths,
-        y=spec_ref,  # Reference spectrogram
-        sid=sid_tensor,
-        tid=tid_tensor,
-        lid=lid_tensor,
-        noise_scale=0.667,
-        noise_scale_w=0.8,
-        length_scale=1.0
-    )[0][0, 0].data.cpu().float().numpy()
-
-filename = f"{OUTPUT_DIR}/torch_output.wav"
-write(filename, hps.data.sampling_rate, audio)
-print(f"Generated: {filename} (shape: {audio.shape})")
+    with torch.no_grad():
+        audio = net_g.infer(
+            x_tst, 
+            x_tst_lengths,
+            y=spec_ref,  # Reference spectrogram
+            sid=sid_tensor,
+            tid=tid_tensor,
+            lid=lid_tensor,
+            noise_scale=0.667,
+            noise_scale_w=0.8, 
+            length_scale=1.0
+        )[0][0, 0].data.cpu().float().numpy()
+    
+    filename = f"{OUTPUT_DIR}/torch_sid{sid}_tid{tid}_lid{lid}.wav"
+    write(filename, hps.data.sampling_rate, audio)
+    print(f"Generated: {filename} (shape: {audio.shape})")
 
 print()
 
@@ -114,43 +117,50 @@ x_tst_lengths_np = x_tst_lengths.cpu().numpy()
 spec_ref_np = spec_ref.cpu().numpy()
 scales_np = scales.numpy()
 
-# ONNX model only has: input, input_lengths, spec_ref, scales
-# sid, tid, lid are not exported to ONNX (they may be embedded or not used)
-ort_inputs = {
-    "input": x_tst_np,
-    "input_lengths": x_tst_lengths_np,
-    "spec_ref": spec_ref_np,
-    "scales": scales_np,
-}
+for sid, tid, lid in configs:
+    sid_np = np.array([sid], dtype=np.int64)
+    tid_np = np.array([tid], dtype=np.int64)
+    lid_np = np.array([lid], dtype=np.int64)
 
-audio = ort_session.run(None, ort_inputs)[0]
-audio = audio.squeeze()
+    ort_inputs = {
+        "input": x_tst_np,
+        "input_lengths": x_tst_lengths_np,
+        "spec_ref": spec_ref_np,
+        "scales": scales_np,
+        "sid": sid_np,
+        "tid": tid_np,
+        "lid": lid_np,
+    }
 
-filename = f"{OUTPUT_DIR}/onnx_output.wav"
-write(filename, hps.data.sampling_rate, audio)
-print(f"Generated: {filename} (shape: {audio.shape})")
+    audio = ort_session.run(None, ort_inputs)[0]
+    audio = audio.squeeze()
+    
+    filename = f"{OUTPUT_DIR}/onnx_sid{sid}_tid{tid}_lid{lid}.wav"
+    write(filename, hps.data.sampling_rate, audio)
+    print(f"Generated: {filename} (shape: {audio.shape})")
 
 print()
 
 # Compare outputs
 print("=== Comparison ===")
-torch_audio, _ = librosa.load(f"{OUTPUT_DIR}/torch_output.wav", sr=hps.data.sampling_rate)
-onnx_audio, _ = librosa.load(f"{OUTPUT_DIR}/onnx_output.wav", sr=hps.data.sampling_rate)
+for sid, tid, lid in configs:
+    torch_audio, _ = librosa.load(f"{OUTPUT_DIR}/torch_sid{sid}_tid{tid}_lid{lid}.wav", sr=hps.data.sampling_rate)
+    onnx_audio, _ = librosa.load(f"{OUTPUT_DIR}/onnx_sid{sid}_tid{tid}_lid{lid}.wav", sr=hps.data.sampling_rate)
 
-# Ensure same length
-min_len = min(len(torch_audio), len(onnx_audio))
-torch_audio = torch_audio[:min_len]
-onnx_audio = onnx_audio[:min_len]
-
-# Calculate metrics
-mse = np.mean((torch_audio - onnx_audio) ** 2)
-mae = np.mean(np.abs(torch_audio - onnx_audio))
-max_diff = np.max(np.abs(torch_audio - onnx_audio))
-
-print(f"PyTorch vs ONNX:")
-print(f"  MSE: {mse:.6f}")
-print(f"  MAE: {mae:.6f}")
-print(f"  Max diff: {max_diff:.6f}")
-print()
+    # Ensure same length
+    min_len = min(len(torch_audio), len(onnx_audio))
+    torch_audio = torch_audio[:min_len]
+    onnx_audio = onnx_audio[:min_len]
+    
+    # Calculate metrics
+    mse = np.mean((torch_audio - onnx_audio) ** 2)
+    mae = np.mean(np.abs(torch_audio - onnx_audio))
+    max_diff = np.max(np.abs(torch_audio - onnx_audio))
+    
+    print(f"sid={sid}, tid={tid}, lid={lid}:")
+    print(f"  MSE: {mse:.6f}")
+    print(f"  MAE: {mae:.6f}")
+    print(f"  Max diff: {max_diff:.6f}")
+    print()
 
 print(f"All outputs saved to: {OUTPUT_DIR}/")
