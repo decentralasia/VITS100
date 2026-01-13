@@ -1,10 +1,5 @@
 ### from @nshmyrev's fork :  https://github.com/alphacep/MB-iSTFT-VITS2/blob/main/export.py
 
-import warnings
-# Suppress ONNX export warnings that don't affect model correctness
-warnings.filterwarnings("ignore", message="Exporting a model to ONNX with a batch_size other than 1")
-warnings.filterwarnings("ignore", message="Constant folding - Only steps=1 can be constant folded")
-
 import librosa
 import matplotlib.pyplot as plt
 
