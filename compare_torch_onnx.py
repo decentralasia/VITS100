@@ -14,8 +14,10 @@ from text import text_to_sequence
 PATH_TO_CONFIG = "/mnt/d/super_last/config.json"
 PATH_TO_MODEL = "/mnt/d/super_last/G_690000.pth"
 PATH_TO_ONNX = "model.onnx"
-INPUT_TEXT = "бишкек"
+INPUT_TEXT = "бишкек кыргызстандын борбору"
+INPUT_LANG = "ky"  # Language code: 'ky' for Kyrgyz, 'ru' for Russian
 OUTPUT_DIR = "comparison_outputs"
+posterior_channels = 80  # Must match the ONNX export configuration
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -45,24 +47,33 @@ utils.load_checkpoint(PATH_TO_MODEL, net_g, None)
 # Load ONNX model
 ort_session = ort.InferenceSession(PATH_TO_ONNX)
 
+# Print ONNX input names to verify
+print("ONNX model inputs:")
+for inp in ort_session.get_inputs():
+    print(f"  {inp.name}: {inp.shape}, {inp.type}")
+print()
+
 # Prepare text
-def get_text(text, hps):
-    text_norm = text_to_sequence(text, hps.data.text_cleaners)
+def get_text(text, hps, lang_code=None):
+    text_norm = text_to_sequence(text, hps.data.text_cleaners, lang_code=lang_code)
     if hps.data.add_blank:
         text_norm = commons.intersperse(text_norm, 0)
     text_norm = torch.LongTensor(text_norm)
     return text_norm
 
-stn_tst = get_text(INPUT_TEXT, hps)
+stn_tst = get_text(INPUT_TEXT, hps, lang_code=INPUT_LANG)
 x_tst = stn_tst.to(device).unsqueeze(0)
 x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).to(device)
 
-# Test configurations: (sid, tid)
+# Create a dummy reference spectrogram (spec_ref)
+# In practice, this should be a real mel spectrogram from a reference audio
+spec_filename = "/mnt/d/00000_000_addresses_004_1_Timur_neutral_kg.mel.pt"
+spec_ref = torch.load(spec_filename, weights_only=True).to(device).unsqueeze(0)
+
+# Test configurations: (sid, tid, lid)
+# Note: ONNX model doesn't use these - they are for PyTorch comparison only
 configs = [
-    (0, 0),
-    (0, 1),
-    (1, 0),
-    (1, 1),
+    (0, 0, 0),
 ]
 
 scales = torch.FloatTensor([0.667, 1.0, 0.8])
@@ -73,24 +84,19 @@ print()
 
 # Generate with PyTorch
 print("=== PyTorch Generation ===")
-for sid, tid in configs:
-    sid_tensor = torch.LongTensor([sid]).to(device)
-    tid_tensor = torch.LongTensor([tid]).to(device)
-    
-    with torch.no_grad():
-        audio = net_g.infer(
-            x_tst, 
-            x_tst_lengths, 
-            sid=sid_tensor, 
-            tid=tid_tensor, 
-            noise_scale=0.667, 
-            noise_scale_w=0.8, 
-            length_scale=1.0
-        )[0][0, 0].data.cpu().float().numpy()
-    
-    filename = f"{OUTPUT_DIR}/torch_sid{sid}_tid{tid}.wav"
-    write(filename, hps.data.sampling_rate, audio)
-    print(f"Generated: {filename} (shape: {audio.shape})")
+sid_tensor = torch.LongTensor([0]).to(device)
+tid_tensor = torch.LongTensor([0]).to(device)
+lid_tensor = torch.LongTensor([0]).to(device)
+
+with torch.no_grad():
+    audio = net_g.infer(
+        x_tst,
+        y=spec_ref,
+    )[0][0, 0].data.cpu().float().numpy()
+
+filename = f"{OUTPUT_DIR}/torch_output.wav"
+write(filename, hps.data.sampling_rate, audio)
+print(f"Generated: {filename} (shape: {audio.shape})")
 
 print()
 
@@ -98,49 +104,44 @@ print()
 print("=== ONNX Generation ===")
 x_tst_np = x_tst.cpu().numpy()
 x_tst_lengths_np = x_tst_lengths.cpu().numpy()
+spec_ref_np = spec_ref.cpu().numpy()
 scales_np = scales.numpy()
 
-for sid, tid in configs:
-    sid_np = np.array([sid], dtype=np.int64)
-    tid_np = np.array([tid], dtype=np.int64)
+# ONNX model only has: input, input_lengths, spec_ref, scales
+# sid, tid, lid are not exported to ONNX (they may be embedded or not used)
+ort_inputs = {
+    "input": x_tst_np,
+    "spec_ref": spec_ref_np,
+}
 
-    ort_inputs = {
-        "input": x_tst_np,
-        "input_lengths": x_tst_lengths_np,
-        "scales": scales_np,
-        "sid": sid_np,
-        "tid": tid_np,
-    }
+audio = ort_session.run(None, ort_inputs)[0]
+audio = audio.squeeze()
 
-    audio = ort_session.run(None, ort_inputs)[0]
-    audio = audio.squeeze()
-    
-    filename = f"{OUTPUT_DIR}/onnx_sid{sid}_tid{tid}.wav"
-    write(filename, hps.data.sampling_rate, audio)
-    print(f"Generated: {filename} (shape: {audio.shape})")
+filename = f"{OUTPUT_DIR}/onnx_output.wav"
+write(filename, hps.data.sampling_rate, audio)
+print(f"Generated: {filename} (shape: {audio.shape})")
 
 print()
 
 # Compare outputs
 print("=== Comparison ===")
-for sid, tid in configs:
-    torch_audio, _ = librosa.load(f"{OUTPUT_DIR}/torch_sid{sid}_tid{tid}.wav", sr=hps.data.sampling_rate)
-    onnx_audio, _ = librosa.load(f"{OUTPUT_DIR}/onnx_sid{sid}_tid{tid}.wav", sr=hps.data.sampling_rate)
-    
-    # Ensure same length
-    min_len = min(len(torch_audio), len(onnx_audio))
-    torch_audio = torch_audio[:min_len]
-    onnx_audio = onnx_audio[:min_len]
-    
-    # Calculate metrics
-    mse = np.mean((torch_audio - onnx_audio) ** 2)
-    mae = np.mean(np.abs(torch_audio - onnx_audio))
-    max_diff = np.max(np.abs(torch_audio - onnx_audio))
-    
-    print(f"sid={sid}, tid={tid}:")
-    print(f"  MSE: {mse:.6f}")
-    print(f"  MAE: {mae:.6f}")
-    print(f"  Max diff: {max_diff:.6f}")
-    print()
+torch_audio, _ = librosa.load(f"{OUTPUT_DIR}/torch_output.wav", sr=hps.data.sampling_rate)
+onnx_audio, _ = librosa.load(f"{OUTPUT_DIR}/onnx_output.wav", sr=hps.data.sampling_rate)
+
+# Ensure same length
+min_len = min(len(torch_audio), len(onnx_audio))
+torch_audio = torch_audio[:min_len]
+onnx_audio = onnx_audio[:min_len]
+
+# Calculate metrics
+mse = np.mean((torch_audio - onnx_audio) ** 2)
+mae = np.mean(np.abs(torch_audio - onnx_audio))
+max_diff = np.max(np.abs(torch_audio - onnx_audio))
+
+print(f"PyTorch vs ONNX:")
+print(f"  MSE: {mse:.6f}")
+print(f"  MAE: {mae:.6f}")
+print(f"  Max diff: {max_diff:.6f}")
+print()
 
 print(f"All outputs saved to: {OUTPUT_DIR}/")

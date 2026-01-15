@@ -1554,7 +1554,8 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, x_lengths, y=None, sid=None, tid=None, lid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
+    def infer(self, x, y, noise_scale=1., noise_scale_w=1., length_scale = 1., sid=None, tid=None, lid=None, max_len=None):
+        x_lengths = torch.full((x.shape[0],), x.shape[1]).to(x.device)
         if y is not None:
             reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
         else:

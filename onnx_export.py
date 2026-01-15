@@ -1,5 +1,15 @@
 ### from @nshmyrev's fork :  https://github.com/alphacep/MB-iSTFT-VITS2/blob/main/export.py
 
+import warnings
+import torch
+
+# Suppress ONNX export warnings that don't affect model correctness
+warnings.filterwarnings("ignore", message="Exporting a model to ONNX with a batch_size other than 1")
+warnings.filterwarnings("ignore", message="Constant folding - Only steps=1 can be constant folded")
+warnings.filterwarnings("ignore", message="Converting a tensor to a Python boolean")
+warnings.filterwarnings("ignore", message="Converting a tensor to a Python integer")
+warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+
 import librosa
 import matplotlib.pyplot as plt
 
@@ -8,7 +18,6 @@ import json
 import math
 
 import requests
-import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -45,20 +54,14 @@ num_symbols = net_g.n_vocab
 num_speakers = net_g.n_speakers
 
 
-def infer_forward(text, text_lengths, spec_ref, scales, sid, tid, lid):
-    noise_scale = scales[0]
-    length_scale = scales[1]
-    noise_scale_w = scales[2]
+def infer_forward(text, spec_ref):
     audio = net_g.infer(
             text,
-            text_lengths,
+            #text_lengths,
             spec_ref,
-            noise_scale=noise_scale,
-            length_scale=length_scale,
-            noise_scale_w=noise_scale_w,
-            sid=sid,
-            tid=tid,
-            lid=lid,
+            #noise_scale=ns,
+            #noise_scale_w=nsw,
+            #length_scale=ls,
     )[0].unsqueeze(1)
 
     return audio
@@ -72,15 +75,20 @@ with torch.no_grad():
 net_g.eval()
 
 # dummy initialization
-dmy_text = torch.randint(low=0, high=num_symbols, size=(1, 50), dtype=torch.long)
+batch_size = 4
+phoneme_length = 64
+noise, noise_w, length_scale = 0.667, 0.8, 1.0
+spec_len = 77
+
+dmy_text = torch.randint(low=0, high=num_symbols, size=(batch_size, phoneme_length), dtype=torch.long)
 dmy_text_length = torch.LongTensor([dmy_text.size(1)])
-dmy_sid = torch.LongTensor([0])
-dmy_tid = torch.LongTensor([0])
-dmy_lid = torch.LongTensor([0])
-scale_config = torch.FloatTensor([0.667, 1.0, 0.8]) # scales -> noise, noise_w, length
-batch_size = 1
-spec_ref= torch.rand(batch_size, posterior_channels, 77, dtype=torch.float32)
-dummy_input = (dmy_text, dmy_text_length, spec_ref, scale_config, dmy_sid, dmy_tid, dmy_lid)
+dmy_noise = torch.FloatTensor([noise])
+dmy_noise_w = torch.FloatTensor([noise_w])
+dmy_length_scale = torch.FloatTensor([length_scale])
+
+spec_ref= torch.rand(batch_size, posterior_channels, spec_len, dtype=torch.float32)
+
+dummy_input = (dmy_text, spec_ref)
 
 
 # Export
@@ -90,11 +98,12 @@ torch.onnx.export(
         f="model.onnx",
         verbose=False,
         opset_version=OPSET_VERSION,
-        input_names=["input", "input_lengths", "spec_ref", "scales", "sid", "tid", "lid"],
+        input_names=["input", "spec_ref"],
         output_names=["output"],
         dynamic_axes={
             "input": {0: "batch_size", 1: "phonemes"},
-            "input_lengths": {0: "batch_size"},
+            #"input_lengths": {0: "batch_size"},
             "output": {0: "batch_size", 1: "time"},
+            "spec_ref": {0: "batch_size", 2: "spec_length"},
         },
 )
