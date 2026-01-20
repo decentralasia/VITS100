@@ -1018,6 +1018,8 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         self.gen_istft_n_fft = gen_istft_n_fft
         self.gen_istft_hop_size = gen_istft_hop_size
 
+        self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
+
         #- for onnx
         if is_onnx == True:
             self.stft = OnnxSTFT(filter_length=self.gen_istft_n_fft, hop_length=self.gen_istft_hop_size, win_length=self.gen_istft_n_fft)
@@ -1029,6 +1031,8 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         stft = TorchSTFT(filter_length=self.gen_istft_n_fft, hop_length=self.gen_istft_hop_size,
                          win_length=self.gen_istft_n_fft).to(x.device) # !
         '''
+        if g is not None:
+            x = x + self.cond(g)
         stft = self.stft.to(x.device)
         pqmf = PQMF(x.device)
 
@@ -1560,7 +1564,7 @@ class SynthesizerTrn(nn.Module):
             reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
         else:
             # Use a zero embedding if no reference audio is provided
-            reference_emb = torch.zeros(x.size(0), self.gin_channels, device=x.device, dtype=x.dtype).unsqueeze(-1)
+            reference_emb = torch.zeros(x.size(0), self.gin_channels, device=x.device, dtype=torch.float32).unsqueeze(-1)
 
         # Option 1: Use reference_emb directly as g (current approach)
         g = reference_emb
