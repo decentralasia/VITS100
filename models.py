@@ -1031,12 +1031,12 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         stft = TorchSTFT(filter_length=self.gen_istft_n_fft, hop_length=self.gen_istft_hop_size,
                          win_length=self.gen_istft_n_fft).to(x.device) # !
         '''
-        if g is not None:
-            x = x + self.cond(g)
         stft = self.stft.to(x.device)
         pqmf = PQMF(x.device)
 
         x = self.conv_pre(x)  # [B, ch, length]
+        if g is not None:
+            x = x + self.cond(g)
 
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, modules.LRELU_SLOPE)
