@@ -508,6 +508,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
 from text import text_to_sequence
 import commons
+import torchaudio
 
 def get_text(text, hps, lid):
     lang_code = "ky" if lid == 0 else "ru"
