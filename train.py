@@ -633,9 +633,9 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     ky_text = ' рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай , курулуш , транспорт , соода же тейлөөнүн башка тармактарына таандык . '
     ru_text = ' бишкек столица кыргызстана '
-
-    ky_text = get_text(ky_text, hps, lid=0).to(generator.device).unsqueeze(0)
-    ru_text = get_text(ru_text, hps, lid=1).to(generator.device).unsqueeze(0)
+    device = generator.device
+    ky_text = get_text(ky_text, hps, lid=0).to(device).unsqueeze(0)
+    ru_text = get_text(ru_text, hps, lid=1).to(device).unsqueeze(0)
 
     spec_file_timur_ky = "DUMMY1/00000_000_inter_sounds_neutral_060_1_Timur_friendly_kg.wav"
     spec_file_timur_ru = "DUMMY1/00195_004_ru_general_044_20_Timur_neutral_ru.wav"
