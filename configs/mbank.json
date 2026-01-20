@@ -4,7 +4,7 @@
       "eval_interval": 2000,
       "seed": 1234,
       "epochs": 20000,
-      "learning_rate": 1e-4,
+      "learning_rate": 5e-5,
       "betas": [0.8, 0.99],
       "eps": 1e-9,
       "batch_size": 16,
@@ -22,7 +22,7 @@
     },
     "data": {
       "use_mel_posterior_encoder": true,
-      "training_files":"combined_train.txt",
+      "training_files":"DUMMY1/train_filtered_manifest.txt",
       "validation_files":"DUMMY1/val_filtered_manifest.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
