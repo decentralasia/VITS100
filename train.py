@@ -649,10 +649,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
 
     with torch.no_grad():
-        audio_timur_ky = net_g.infer(ky_text, y=spec_ref_timur_ky)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = net_g.infer(ru_text, y=spec_ref_timur_ru)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = net_g.infer(ky_text, y=spec_ref_aiganysh_ky)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ru = net_g.infer(ru_text, y=spec_ref_aiganysh_ru)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ky = generator.infer(ky_text, y=spec_ref_timur_ky)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.infer(ru_text, y=spec_ref_timur_ru)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.infer(ky_text, y=spec_ref_aiganysh_ky)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ru = generator.infer(ru_text, y=spec_ref_aiganysh_ru)[0][0, 0].data.cpu().float().numpy()
 
 
     # Log validation metrics to wandb
