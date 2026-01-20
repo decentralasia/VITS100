@@ -506,6 +506,17 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if rank == 0:
         logger.info('====> Epoch: {}'.format(epoch))
 
+from text import text_to_sequence
+import commons
+
+def get_text(text, hps, lid):
+    lang_code = "ky" if lid == 0 else "ru"
+    text_norm = text_to_sequence(text, hps.data.text_cleaners, lang_code)
+    if hps.data.add_blank:
+        text_norm = commons.intersperse(text_norm, 0)
+    text_norm = torch.LongTensor(text_norm)
+    return text_norm
+
 def file_to_mel(file_path,
                 target_sr=22050,
                 n_mels=80,
