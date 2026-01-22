@@ -92,7 +92,7 @@ def main():
             print(f"Skipping missing file: {wav}", file=sys.stderr)
             continue
 
-        out_path = wav.with_suffix('.pt')
+        out_path = wav.with_suffix('.emb.pt')
         if out_path.exists() and not args.overwrite:
             # skip existing
             continue
