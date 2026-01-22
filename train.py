@@ -689,7 +689,8 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     generator.train()
 
-
+# sed -i 's/\xC2\xA0/ /g' file.txt
+# sed -i "s/<inhаl>е>/<inhale>/g" DUMMY1/train_filtered_manifest.txt
 if __name__ == "__main__":
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     main()
