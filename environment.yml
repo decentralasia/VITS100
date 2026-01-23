@@ -1,0 +1,9 @@
+name: universal_models_312
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - cudnn
+  - cuda-version=12.8
+  - libstdcxx-ng
+prefix: /home/k_arzymatov/miniconda3/envs/universal_models_312
