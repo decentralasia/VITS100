@@ -126,11 +126,10 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         audiopath, sid, tone, lid, real_text, pronounced_text = audiopath_sid_tone_lang_text
         text = self.get_text(pronounced_text, lid)
         spec, wav = self.get_audio(audiopath)
-        spk_emb = self.get_speaker_embedding(audiopath)
         sid = self.get_sid(sid)
         tone_id = self.get_tone_id(tone)
         lid = self.get_lid(lid)
-        return text, spec, wav, sid, tone_id, lid, spk_emb
+        return text, spec, wav, sid, tone_id, lid
 
     def get_audio(self, filename):
         # TODO : if linear spec exists convert to mel from existing linear spec
@@ -167,17 +166,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
             torch.save(spec, spec_filename)
         return spec, audio_norm
 
-    def get_speaker_embedding(self, filename):
-        """Load pre-computed speaker embedding from .emb.pt file"""
-        emb_filename = filename.replace(".wav", ".emb.pt")
-        if os.path.exists(emb_filename):
-            spk_emb = torch.load(emb_filename, weights_only=True)
-        else:
-            # If embedding file doesn't exist, return a zero embedding
-            # Assuming 256-dimensional embeddings as mentioned
-            spk_emb = torch.zeros(256)
-            print(f"Warning: Speaker embedding not found for {filename}, using zero embedding")
-        return spk_emb
+
 
     def get_text(self, text, lid):
         # Convert language ID string to language code for text_to_sequence
@@ -225,7 +214,7 @@ class TextAudioSpeakerToneLangCollate():
         """Collate's training batch from normalized text, audio and speaker identities
         PARAMS
         ------
-        batch: [text_normalized, spec_normalized, wav_normalized, sid, tone_id, lid, spk_emb]
+        batch: [text_normalized, spec_normalized, wav_normalized, sid, tone_id, lid]
         """
         # Right zero-pad all one-hot text sequences to max input length
         _, ids_sorted_decreasing = torch.sort(
@@ -246,14 +235,10 @@ class TextAudioSpeakerToneLangCollate():
         text_padded = torch.LongTensor(len(batch), max_text_len)
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
-        # Speaker embeddings - assuming they are 256-dimensional
-        spk_emb_dim = batch[0][6].size(0)
-        spk_emb = torch.FloatTensor(len(batch), spk_emb_dim)
 
         text_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
-        spk_emb.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
@@ -272,8 +257,7 @@ class TextAudioSpeakerToneLangCollate():
             sid[i] = row[3]
             toneid[i] = row[4]
             lid[i] = row[5]
-            spk_emb[i] = row[6]
 
         if self.return_ids:
-            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid, spk_emb, ids_sorted_decreasing
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid, spk_emb
+            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid, ids_sorted_decreasing
+        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid
