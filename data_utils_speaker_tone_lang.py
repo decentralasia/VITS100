@@ -51,6 +51,7 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         }
         self.language_dict = {
             "kg": 0,
+            "ky": 0,
             "ru": 1,
         }
         self.hparams = hparams
@@ -193,20 +194,17 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         return text_norm
 
     def get_sid(self, sid):
-        # sid = self.speaker_dict[sid]
-        sid = 0
+        sid = self.speaker_dict[sid]
         sid = torch.LongTensor([int(sid)])
         return sid
 
     def get_tone_id(self, tone):
-        # tone_id = self.tone_dict[tone]
-        tone_id = 0
+        tone_id = self.tone_dict[tone]
         tone_id = torch.LongTensor([int(tone_id)])
         return tone_id
 
     def get_lid(self, lid):
-        # l_id = self.language_dict[lid]
-        l_id = 0
+        l_id = self.language_dict[lid]
         l_id = torch.LongTensor([int(l_id)])
         return l_id
 

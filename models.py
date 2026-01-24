@@ -1035,8 +1035,8 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         pqmf = PQMF(x.device)
 
         x = self.conv_pre(x)  # [B, ch, length]
-        if g is not None:
-            x = x + self.cond(g)
+        # if g is not None:
+        #     x = x + self.cond(g)
 
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, modules.LRELU_SLOPE)
@@ -1467,14 +1467,15 @@ class SynthesizerTrn(nn.Module):
         # My modifications (kenenbek)
         self.n_tones = n_tones
         self.n_languages = n_languages
-        # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
-        # self.emb_speaker = nn.Embedding(n_speakers, gin_channels // 2)
-        # self.emb_tone = nn.Embedding(n_tones, gin_channels // 2)
-        # self.emb_language = nn.Embedding(n_languages, gin_channels // 2)
-        #
-        # # Project concatenated embeddings back to gin_channels
-        # self.g_proj = nn.Conv1d(3 * gin_channels, gin_channels, 1)
+
         self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
+        # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
+        self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
+        self.emb_tone = nn.Embedding(n_tones, gin_channels)
+        self.emb_language = nn.Embedding(n_languages, gin_channels)
+        # Project concatenated embeddings back to gin_channels
+        self.g_proj = nn.Conv1d(4 * gin_channels, gin_channels, 1)
+
 
     def _build_g(self, sid, tid, lid, reference_emb):
         """
@@ -1524,16 +1525,63 @@ class SynthesizerTrn(nn.Module):
 
         return g
 
+    def _build_g_3(self, sid, tid, lid, reference_emb):
+        """
+        Build conditioning vector g with shape [B, gin_channels, 1] using all available embeddings:
+        speaker ID, tone ID, language ID, pre-computed speaker embeddings, and reference embeddings.
+        Each embedding is passed through its corresponding projection.
+
+        Args:
+            sid: [B] - Speaker IDs (optional, can be None)
+            tid: [B] - Tone IDs (optional, can be None)
+            lid: [B] - Language IDs (optional, can be None)
+            spk_emb: [B, 256] - Pre-computed speaker embeddings (optional, can be None)
+            reference_emb: [B, gin_channels] or [B, gin_channels, 1] - Reference encoder output
+
+        Returns:
+            g: [B, gin_channels, 1] - Projected conditioning vector
+        """
+        embeddings = []
+        
+        # Ensure reference_emb is [B, gin_channels]
+        if reference_emb.dim() == 3:
+            reference_emb = reference_emb.squeeze(-1)
+        
+        # Process each embedding through its corresponding projection
+        spk = self.emb_speaker(sid)  # [B, gin_channels // 2] or [B, gin_channels]
+        embeddings.append(spk)
+        
+        tone = self.emb_tone(tid)  # [B, gin_channels // 2] or [B, gin_channels]
+        embeddings.append(tone)
+        
+        lang = self.emb_language(lid)  # [B, gin_channels // 2] or [B, gin_channels]
+        embeddings.append(lang)
+        
+        embeddings.append(spk_emb)  # [B, 256]
+        embeddings.append(reference_emb)  # [B, gin_channels]
+        
+        # Concatenate all available embeddings
+        g_cat = torch.cat(embeddings, dim=1)  # [B, total_channels]
+
+        # Project to gin_channels
+        g = self.g_proj(g_cat)  # [B, gin_channels]
+        g = g.unsqueeze(-1)  # [B, gin_channels, 1]
+        
+        return g
+
 
     def forward(self, x, x_lengths, y, y_lengths, sid=None, tid=None, lid=None, spk_emb=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
         reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
 
-        # Option 1: Use reference_emb directly as g (current approach)
-        g = self._build_g_2(spk_emb=spk_emb, reference_emb=reference_emb)
+        # Option 1: Use _build_g_2 with spk_emb and reference_emb (current approach)
+        # g = self._build_g_2(spk_emb=spk_emb, reference_emb=reference_emb)
 
-        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings (commented out)
+        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings
         # g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+
+        # Option 3: Use _build_g_3 to combine all available embeddings (sid, tid, lid, spk_emb, reference_emb)
+        g = self._build_g_3(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
@@ -1589,7 +1637,7 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, y, noise_scale=1., noise_scale_w=1., length_scale = 1., sid=None, tid=None, lid=None, max_len=None):
+    def infer(self, x, y, noise_scale=1., noise_scale_w=1., length_scale = 1., sid=None, tid=None, lid=None, spk_emb=None, max_len=None):
         x_lengths = torch.full((x.shape[0],), x.shape[1]).to(x.device)
         if y is not None:
             reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
@@ -1597,11 +1645,18 @@ class SynthesizerTrn(nn.Module):
             # Use a zero embedding if no reference audio is provided
             reference_emb = torch.zeros(x.size(0), self.gin_channels, device=x.device, dtype=torch.float32).unsqueeze(-1)
 
-        # Option 1: Use reference_emb directly as g (current approach)
-        g = reference_emb
+        # Option 1: Use reference_emb directly as g (simple approach)
+        # g = reference_emb
 
-        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings (commented out)
+        # Option 2: Use _build_g to combine speaker, tone, language, and reference embeddings
         # g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+
+        # Option 3: Use _build_g_2 with spk_emb and reference_emb
+        # if spk_emb is not None:
+        #     g = self._build_g_2(spk_emb=spk_emb, reference_emb=reference_emb)
+
+        # Option 4: Use _build_g_3 to combine all available embeddings (sid, tid, lid, spk_emb, reference_emb)
+        g = self._build_g_3(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
         if self.use_sdp:
