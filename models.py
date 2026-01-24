@@ -1018,7 +1018,7 @@ class Multiband_iSTFT_Generator(torch.nn.Module): # !
         self.gen_istft_n_fft = gen_istft_n_fft
         self.gen_istft_hop_size = gen_istft_hop_size
 
-        self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
+        #self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
 
         #- for onnx
         if is_onnx == True:
