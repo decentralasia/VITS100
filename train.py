@@ -637,6 +637,12 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     ky_text = get_text(ky_text, hps, lid=0).to(device).unsqueeze(0)
     ru_text = get_text(ru_text, hps, lid=1).to(device).unsqueeze(0)
 
+    sid_0 = torch.LongTensor([0]).to(device)
+    sid_1 = torch.LongTensor([1]).to(device)
+    tid = torch.LongTensor([0]).to(device)
+    lid_0 = torch.LongTensor([0]).to(device)
+    lid_1 = torch.LongTensor([1]).to(device)
+
     spec_file_timur_ky = "DUMMY1/00000_000_inter_sounds_neutral_060_1_Timur_friendly_kg.wav"
     spec_file_timur_ru = "DUMMY1/00195_004_ru_general_044_20_Timur_neutral_ru.wav"
     spec_file_aiganysh_ky = "DUMMY1/00000_000_inter_news_05-1_024_1_Aiganysh_strict_kg.wav"
@@ -649,10 +655,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
 
     with torch.no_grad():
-        audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
 
 
     # Log validation metrics to wandb
