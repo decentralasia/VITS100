@@ -4,7 +4,7 @@ import triton
 import triton.language as tl
 
 
-#@triton.jit
+@triton.jit
 def maximum_path_cp(
         path, value, t_x, t_y,
         B, T, S,
