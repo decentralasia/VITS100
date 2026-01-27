@@ -47,7 +47,7 @@
       "n_tones": 3,
       "n_languages": 2,
 
-      "monotonic_align": "ma",
+      "monotonic_align": "sma_triton",
       "use_mel_posterior_encoder": true,
       "use_transformer_flows": true,
       "transformer_flow_type": "pre_conv2",
