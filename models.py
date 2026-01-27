@@ -1606,21 +1606,14 @@ class SynthesizerTrn(nn.Module):
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
     def infer(self, x, y, noise_scale=1., noise_scale_w=1., length_scale = 1., sid=None, tid=None, lid=None, max_len=None):
-        x_lengths = torch.full((x.shape[0],), x.shape[1]).to(x.device)
-        if y is not None:
-            reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        else:
-            # Use a zero embedding if no reference audio is provided
-            reference_emb = torch.zeros(x.size(0), self.gin_channels, device=x.device, dtype=torch.float32).unsqueeze(-1)
+        x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
+        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
-        if self.use_sdp:
-            logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
-        else:
-            logw = self.dp(x, x_mask, g=g)
+        logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()

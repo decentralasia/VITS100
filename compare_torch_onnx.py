@@ -92,6 +92,9 @@ with torch.no_grad():
     audio = net_g.infer(
         x_tst,
         y=spec_ref,
+        sid=sid_tensor,
+        tid=tid_tensor,
+        lid=lid_tensor,
     )[0][0, 0].data.cpu().float().numpy()
 
 filename = f"{OUTPUT_DIR}/torch_output.wav"
@@ -107,11 +110,17 @@ x_tst_lengths_np = x_tst_lengths.cpu().numpy()
 spec_ref_np = spec_ref.cpu().numpy()
 scales_np = scales.numpy()
 
-# ONNX model only has: input, input_lengths, spec_ref, scales
-# sid, tid, lid are not exported to ONNX (they may be embedded or not used)
+# ONNX model inputs: input, spec_ref, sid, tid, lid
+sid_np = np.array([0], dtype=np.int64)
+tid_np = np.array([0], dtype=np.int64)
+lid_np = np.array([0], dtype=np.int64)
+
 ort_inputs = {
     "input": x_tst_np,
     "spec_ref": spec_ref_np,
+    "sid": sid_np,
+    "tid": tid_np,
+    "lid": lid_np,
 }
 
 audio = ort_session.run(None, ort_inputs)[0]

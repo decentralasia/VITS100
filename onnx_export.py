@@ -11,7 +11,6 @@ warnings.filterwarnings("ignore", message="Converting a tensor to a Python integ
 warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
 
 import librosa
-import matplotlib.pyplot as plt
 
 import os
 import json
@@ -22,7 +21,6 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-import commons
 import utils
 from models import SynthesizerTrn
 from text.symbols import symbols
@@ -34,9 +32,9 @@ from scipy import signal
 
 
 #- Variable section
-PATH_TO_CONFIG = "/mnt/d/super_last/config.json"
-PATH_TO_MODEL = "/mnt/d/super_last/G_690000.pth"
-OPSET_VERSION = 15
+PATH_TO_CONFIG = "/mnt/d/logs/config.json"
+PATH_TO_MODEL = "/mnt/d/logs/G_104000.pth"
+OPSET_VERSION = 17
 posterior_channels = 80
 
 hps = utils.get_hparams_from_file(PATH_TO_CONFIG)
@@ -54,15 +52,17 @@ num_symbols = net_g.n_vocab
 num_speakers = net_g.n_speakers
 
 
-def infer_forward(text, spec_ref):
+def infer_forward(text, spec_ref, sid, tid, lid):
     audio = net_g.infer(
             text,
-            #text_lengths,
             spec_ref,
-            #noise_scale=ns,
-            #noise_scale_w=nsw,
-            #length_scale=ls,
-    )[0].unsqueeze(1)
+            noise_scale=0.667,
+            noise_scale_w=0.8,
+            length_scale=1.0,
+            sid=sid,
+            tid=tid,
+            lid=lid
+    )[0]
 
     return audio
 
@@ -74,36 +74,40 @@ with torch.no_grad():
 
 net_g.eval()
 
-# dummy initialization
-batch_size = 4
-phoneme_length = 64
-noise, noise_w, length_scale = 0.667, 0.8, 1.0
-spec_len = 77
+# dummy initialization - use batch_size=1 for cleaner ONNX graph
+# Use larger phoneme_length to ensure stable shape inference
+batch_size = 1
+phoneme_length = 100  # Larger value for better TensorRT shape inference
+spec_len = 200
 
+# Use int32 instead of int64 (long) for TensorRT compatibility
 dmy_text = torch.randint(low=0, high=num_symbols, size=(batch_size, phoneme_length), dtype=torch.long)
-dmy_text_length = torch.LongTensor([dmy_text.size(1)])
-dmy_noise = torch.FloatTensor([noise])
-dmy_noise_w = torch.FloatTensor([noise_w])
-dmy_length_scale = torch.FloatTensor([length_scale])
 
-spec_ref= torch.rand(batch_size, posterior_channels, spec_len, dtype=torch.float32)
+spec_ref = torch.rand(batch_size, posterior_channels, spec_len, dtype=torch.float32)
+dmy_sid = torch.zeros(batch_size, dtype=torch.long)
+dmy_tid = torch.zeros(batch_size, dtype=torch.long)
+dmy_lid = torch.zeros(batch_size, dtype=torch.long)
 
-dummy_input = (dmy_text, spec_ref)
+dummy_input = (dmy_text, spec_ref, dmy_sid, dmy_tid, dmy_lid)
 
-
-# Export
+# Export with limited dynamic axes - only batch dimension is dynamic
+# This provides better TensorRT compatibility
 torch.onnx.export(
         model=net_g,
         args=dummy_input,
         f="model.onnx",
         verbose=False,
         opset_version=OPSET_VERSION,
-        input_names=["input", "spec_ref"],
+        input_names=["input", "spec_ref", "sid", "tid", "lid"],
         output_names=["output"],
         dynamic_axes={
             "input": {0: "batch_size", 1: "phonemes"},
-            #"input_lengths": {0: "batch_size"},
-            "output": {0: "batch_size", 1: "time"},
+            "output": {0: "batch_size", 2: "time"},
             "spec_ref": {0: "batch_size", 2: "spec_length"},
+            "sid": {0: "batch_size"},
+            "tid": {0: "batch_size"},
+            "lid": {0: "batch_size"},
         },
 )
+
+print("ONNX export completed successfully!")

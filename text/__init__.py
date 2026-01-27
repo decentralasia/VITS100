@@ -48,7 +48,7 @@ def tokenize_pronounced_text(pronounced_text, lang_code=None):
 
     return tokens
 
-def text_to_sequence(text, cleaner_names, lang_code=None):
+def text_to_sequence(text, cleaner_names, lang_code):
   '''Converts a string of text to a sequence of IDs corresponding to the symbols in the text.
     Args:
       text: string to convert to a sequence

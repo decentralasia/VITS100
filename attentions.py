@@ -165,9 +165,10 @@ class MultiHeadAttention(nn.Module):
   def attention(self, query, key, value, mask=None):
     # reshape [b, d, t] -> [b, n_h, t, d_k]
     b, d, t_s, t_t = (*key.size(), query.size(2))
-    query = query.view(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
-    key = key.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
-    value = value.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    # Use reshape instead of view for TensorRT compatibility with dynamic shapes
+    query = query.reshape(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
+    key = key.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    value = value.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
 
     scores = torch.matmul(query / math.sqrt(self.k_channels), key.transpose(-2, -1))
     if self.window_size is not None:
@@ -192,15 +193,16 @@ class MultiHeadAttention(nn.Module):
       relative_weights = self._absolute_position_to_relative_position(p_attn)
       value_relative_embeddings = self._get_relative_embeddings(self.emb_rel_v, t_s)
       output = output + self._matmul_with_relative_values(relative_weights, value_relative_embeddings)
-    output = output.transpose(2, 3).contiguous().view(b, d, t_t) # [b, n_h, t_t, d_k] -> [b, d, t_t]
+    output = output.transpose(2, 3).contiguous().reshape(b, d, t_t) # [b, n_h, t_t, d_k] -> [b, d, t_t]
     return output, p_attn
 
   def attention2(self, query, key, value, mask=None): #-! reserve for next experiment
     # reshape [b, d, t] -> [b, n_h, t, d_k]
     b, d, t_s, t_t = (*key.size(), query.size(2))
-    query = query.view(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
-    key = key.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
-    value = value.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    # Use reshape instead of view for TensorRT compatibility with dynamic shapes
+    query = query.reshape(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
+    key = key.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
+    value = value.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
 
     scores = torch.matmul(query / math.sqrt(self.k_channels), key.transpose(-2, -1))
     if self.window_size is not None:
@@ -225,7 +227,7 @@ class MultiHeadAttention(nn.Module):
       relative_weights = self._absolute_position_to_relative_position(p_attn)
       value_relative_embeddings = self._get_relative_embeddings(self.emb_rel_v, t_s)
       output = output + self._matmul_with_relative_values(relative_weights, value_relative_embeddings)
-    output = output.transpose(2, 3).contiguous().view(b, d, t_t) # [b, n_h, t_t, d_k] -> [b, d, t_t]
+    output = output.transpose(2, 3).contiguous().reshape(b, d, t_t) # [b, n_h, t_t, d_k] -> [b, d, t_t]
     return output, p_attn
 
   def _matmul_with_relative_values(self, x, y):
@@ -271,11 +273,12 @@ class MultiHeadAttention(nn.Module):
     x = F.pad(x, commons.convert_pad_shape([[0,0],[0,0],[0,0],[0,1]]))
 
     # Concat extra elements so to add up to shape (len+1, 2*len-1).
-    x_flat = x.view([batch, heads, length * 2 * length])
+    # Use reshape instead of view for TensorRT compatibility with dynamic shapes
+    x_flat = x.reshape(batch, heads, -1)
     x_flat = F.pad(x_flat, commons.convert_pad_shape([[0,0],[0,0],[0,length-1]]))
 
     # Reshape and slice out the padded elements.
-    x_final = x_flat.view([batch, heads, length+1, 2*length-1])[:, :, :length, length-1:]
+    x_final = x_flat.reshape(batch, heads, length+1, 2*length-1)[:, :, :length, length-1:]
     return x_final
 
   def _absolute_position_to_relative_position(self, x):
@@ -286,10 +289,11 @@ class MultiHeadAttention(nn.Module):
     batch, heads, length, _ = x.size()
     # padd along column
     x = F.pad(x, commons.convert_pad_shape([[0, 0], [0, 0], [0, 0], [0, length-1]]))
-    x_flat = x.view([batch, heads, length**2 + length*(length -1)])
+    # Use reshape instead of view for TensorRT compatibility with dynamic shapes
+    x_flat = x.reshape(batch, heads, -1)
     # add 0's in the beginning that will skew the elements after reshape
     x_flat = F.pad(x_flat, commons.convert_pad_shape([[0, 0], [0, 0], [length, 0]]))
-    x_final = x_flat.view([batch, heads, length, 2*length])[:,:,:,1:]
+    x_final = x_flat.reshape(batch, heads, length, 2*length)[:,:,:,1:]
     return x_final
 
   def _attention_bias_proximal(self, length):
