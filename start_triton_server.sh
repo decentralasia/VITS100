@@ -26,5 +26,10 @@ docker run --rm -it \
     -p 8001:8001 \
     -p 8002:8002 \
     -v "$MODEL_REPO:/models" \
-    nvcr.io/nvidia/tritonserver:24.01-py3 \
+    kingoftheflies/aiph-triton-all \
     tritonserver --model-repository=/models --log-verbose=1
+
+
+
+#nvcr.io/nvidia/tritonserver:24.01-py3 \
+#

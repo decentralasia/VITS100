@@ -33,7 +33,7 @@ from scipy import signal
 
 #- Variable section
 PATH_TO_CONFIG = "/mnt/d/logs/config.json"
-PATH_TO_MODEL = "/mnt/d/logs/G_104000.pth"
+PATH_TO_MODEL = "/mnt/d/logs/G_498000.pth"
 OPSET_VERSION = 17
 posterior_channels = 80
 
@@ -53,7 +53,7 @@ num_speakers = net_g.n_speakers
 
 
 def infer_forward(text, spec_ref, sid, tid, lid):
-    audio = net_g.infer(
+    result = net_g.infer(
             text,
             spec_ref,
             noise_scale=0.667,
@@ -62,9 +62,11 @@ def infer_forward(text, spec_ref, sid, tid, lid):
             sid=sid,
             tid=tid,
             lid=lid
-    )[0]
+    )
+    audio = result[0].squeeze(1)  # Remove channel dim: [B, 1, T] -> [B, T]
+    y_lengths = result[5].to(torch.int32)  # Convert to int32 for TensorRT compatibility
 
-    return audio
+    return audio, y_lengths
 
 
 with torch.no_grad():
@@ -80,13 +82,12 @@ batch_size = 1
 phoneme_length = 100  # Larger value for better TensorRT shape inference
 spec_len = 200
 
-# Use int32 instead of int64 (long) for TensorRT compatibility
-dmy_text = torch.randint(low=0, high=num_symbols, size=(batch_size, phoneme_length), dtype=torch.long)
+dmy_text = torch.randint(low=0, high=num_symbols, size=(batch_size, phoneme_length), dtype=torch.int32)
 
 spec_ref = torch.rand(batch_size, posterior_channels, spec_len, dtype=torch.float32)
-dmy_sid = torch.zeros(batch_size, dtype=torch.long)
-dmy_tid = torch.zeros(batch_size, dtype=torch.long)
-dmy_lid = torch.zeros(batch_size, dtype=torch.long)
+dmy_sid = torch.zeros(batch_size, dtype=torch.int32)
+dmy_tid = torch.zeros(batch_size, dtype=torch.int32)
+dmy_lid = torch.zeros(batch_size, dtype=torch.int32)
 
 dummy_input = (dmy_text, spec_ref, dmy_sid, dmy_tid, dmy_lid)
 
@@ -99,10 +100,11 @@ torch.onnx.export(
         verbose=False,
         opset_version=OPSET_VERSION,
         input_names=["input", "spec_ref", "sid", "tid", "lid"],
-        output_names=["output"],
+        output_names=["raw_waveform", "y_length"],
         dynamic_axes={
             "input": {0: "batch_size", 1: "phonemes"},
-            "output": {0: "batch_size", 2: "time"},
+            "raw_waveform": {0: "batch_size"},
+            "y_length": {0: "batch_size"},
             "spec_ref": {0: "batch_size", 2: "spec_length"},
             "sid": {0: "batch_size"},
             "tid": {0: "batch_size"},

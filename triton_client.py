@@ -15,12 +15,18 @@ import sys
 sys.path.insert(0, '.')
 
 from text import text_to_sequence
-import commons
+
+
+def intersperse(lst, item):
+  result = [item] * (len(lst) * 2 + 1)
+  result[1::2] = lst
+  return result
+
 
 def get_text(text, lid):
     lang_code = "ky" if lid == 0 else "ru"
     text_norm = text_to_sequence(text, cleaner_names=[], lang_code=lang_code)
-    text_norm = commons.intersperse(text_norm, 0)
+    text_norm = intersperse(text_norm, 0)
     return np.array(text_norm, dtype=np.int32)
 
 
@@ -76,7 +82,7 @@ def run_inference(
     client = grpcclient.InferenceServerClient(url=triton_url)
     
     # Prepare inputs with batch dimension
-    input_ids = text_sequence.reshape(1, -1)  # [1, seq_len]
+    input_ids = text_sequence.reshape(1, -1).astype(np.int32)  # [1, seq_len]
     spec_ref = reference_mel.reshape(1, reference_mel.shape[0], -1)  # [1, 80, spec_len]
     sid = np.array([speaker_id], dtype=np.int32)  # [1]
     tid = np.array([tone_id], dtype=np.int32)  # [1]
@@ -97,15 +103,26 @@ def run_inference(
     inputs[3].set_data_from_numpy(tid)
     inputs[4].set_data_from_numpy(lid)
     
-    # Create output placeholder
-    outputs = [grpcclient.InferRequestedOutput("output")]
+    # Create output placeholders
+    outputs = [
+        grpcclient.InferRequestedOutput("raw_waveform"),
+        grpcclient.InferRequestedOutput("y_length"),
+    ]
     
     # Run inference
     response = client.infer(model_name=model_name, inputs=inputs, outputs=outputs)
     
-    # Get audio output
-    audio = response.as_numpy("output")
-    return audio.squeeze()  # Remove batch and channel dimensions
+    # Get audio output and length
+    audio = response.as_numpy("raw_waveform")
+    y_length = response.as_numpy("y_length")
+    
+    # Trim audio to actual length to remove metallic noise at the end
+    # y_length is in frames, audio_samples = y_length * hop_length (256)
+    hop_length = 256
+    actual_length = int(y_length[0]) * hop_length
+    audio = audio.squeeze()[:actual_length]  # Remove batch dim and trim
+    
+    return audio
 
 
 def save_wav(audio: np.ndarray, output_path: str, sample_rate: int = 22050):
