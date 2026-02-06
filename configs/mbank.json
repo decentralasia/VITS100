@@ -42,7 +42,7 @@
       "cleaned_text": false
     },
     "model": {
-      "gin_channels": 256,
+      "gin_channels": 192,
       "n_speakers": 2,
       "n_tones": 3,
       "n_languages": 2,
