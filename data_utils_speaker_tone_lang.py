@@ -1,5 +1,7 @@
 import time
 import os
+import re
+import json
 import random
 import numpy as np
 import torch
@@ -8,7 +10,57 @@ import torch.utils.data
 import commons
 from mel_processing import spectrogram_torch, mel_spectrogram_torch, spec_to_mel_torch
 from utils import load_wav_to_torch_2, load_filepaths_and_text
-from text import text_to_sequence, cleaned_text_to_sequence
+
+# Import Kyrgyz phonemizer
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), "AIF"))
+from preprocessing_utils.ky_phonemizer import KyrgyzToIpaV2
+
+# Load symbols encoding and create blank token
+_SYMBOLS_ENCODING_PATH = os.path.join(os.path.dirname(__file__), "AIF/model_artifacts/symbols_encoding_train_v7.json")
+_TRANSLITERATION_MAPPING_PATH = os.path.join(os.path.dirname(__file__), "AIF/phonimization_artifacts/transliteration_mapping.json")
+_FST_PATH = os.path.join(os.path.dirname(__file__), "AIF/phonimization_artifacts/ipa.ohfst")
+
+with open(_SYMBOLS_ENCODING_PATH, "r", encoding="utf-8") as f:
+    SYMBOLS_MAPPING = json.load(f)
+
+# Reserve blank token with biggest token id + 1
+BLANK_TOKEN_ID = max(SYMBOLS_MAPPING.values()) + 2
+EXHALE_TOKEN_ID = max(SYMBOLS_MAPPING.values()) + 1
+
+with open(_TRANSLITERATION_MAPPING_PATH, "r", encoding="utf-8") as f:
+    TRANSLITERATION_MAPPING = json.load(f)
+
+# Initialize Kyrgyz phonemizer
+KYRGYZ_PHONEMIZER = KyrgyzToIpaV2(
+    symbols_mapping=SYMBOLS_MAPPING,
+    transliteratetion_mapping=TRANSLITERATION_MAPPING,
+    fst_path=_FST_PATH
+)
+
+_whitespace_re = re.compile(r"\s+")
+
+# Mapping for paralinguistic sounds (tags to special symbols)
+MAPPING_SOUND = {
+    "<inhale/>": "ω",
+    "<yawn/>": "ξ",
+    "<cough/>": "σ",
+    "<inhale>": "ω",
+    "<yawn>": "ξ",
+    "<cough>": "σ",
+    "<exhale>": "τ",
+}
+
+def collapse_whitespace(text: str) -> str:
+    return re.sub(_whitespace_re, " ", text)
+
+def clean_spaces(text: str) -> str:
+    """Remove spaces around punctuation marks."""
+    return re.sub(r"\s*([@,.?!])\s*", r"\1", text)
+
+def symbols_to_ids(text: str) -> list:
+    """Convert symbols to token IDs using the symbols mapping."""
+    return [SYMBOLS_MAPPING[symb] for symb in text if symb in SYMBOLS_MAPPING]
 
 class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     """
@@ -124,12 +176,12 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     def get_audio_text_speaker_tone_lang_pair(self, audiopath_sid_tone_lang_text):
         # separate filename, speaker_id and text
         audiopath, sid, tone, lid, real_text, pronounced_text = audiopath_sid_tone_lang_text
-        text = self.get_text(pronounced_text, lid)
+        text, emphasis = self.get_text(pronounced_text, lid)
         spec, wav = self.get_audio(audiopath)
         sid = self.get_sid(sid)
         tone_id = self.get_tone_id(tone)
         lid = self.get_lid(lid)
-        return text, spec, wav, sid, tone_id, lid
+        return text, emphasis, spec, wav, sid, tone_id, lid
 
     def get_audio(self, filename):
         # TODO : if linear spec exists convert to mel from existing linear spec
@@ -169,18 +221,128 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
 
 
     def get_text(self, text, lid):
-        # Convert language ID string to language code for text_to_sequence
-        # lid can be 'kg' for Kyrgyz or 'ru' for Russian
-        lang_code = 'ky' if lid == 'kg' else lid  # Convert 'kg' to 'ky' for consistency
+        # lid can be 'kg'/'ky' for Kyrgyz or 'ru' for Russian
+        is_kyrgyz = lid in ('kg', 'ky')
         
-        if self.cleaned_text:
-            text_norm = cleaned_text_to_sequence(text)
+        # Add @ at the beginning if not present
+        if not text.startswith("@"):
+            text = "@" + text
+        
+        # Replace paralinguistic tags with special symbols
+        for tag, symbol in MAPPING_SOUND.items():
+            text = text.replace(tag, symbol)
+        
+        if is_kyrgyz:
+            # Phonemize Kyrgyz text (phonemizer handles uppercase with *...* markers)
+            phonemized = KYRGYZ_PHONEMIZER.phonemize(text)
+            phonemized = collapse_whitespace(phonemized)
+            phonemized = clean_spaces(phonemized).strip()
+            text_norm, is_highlighted = self._process_phonemized_with_highlights(phonemized)
         else:
-            text_norm = text_to_sequence(text, self.text_cleaners, lang_code)
+            # Russian text: process with highlight detection
+            text_clean = collapse_whitespace(text)
+            text_clean = clean_spaces(text_clean).strip()
+            text_norm, is_highlighted = self._process_russian_with_highlights(text_clean)
+        
         if self.add_blank:
-            text_norm = commons.intersperse(text_norm, 0)
+            text_norm = commons.intersperse(text_norm, BLANK_TOKEN_ID)
+            # Intersperse emphasis: blank tokens adjacent to emphasized tokens should also be emphasized
+            is_highlighted = self._intersperse_emphasis(is_highlighted)
+        
         text_norm = torch.LongTensor(text_norm)
-        return text_norm
+        is_highlighted = torch.LongTensor(is_highlighted)
+        return text_norm, is_highlighted
+    
+    def _process_phonemized_with_highlights(self, text):
+        """
+        Process phonemized text with *...* markers for highlighted (uppercase) words.
+        The ^ sign inside or directly after highlighted region is also highlighted.
+        """
+        text_norm = []
+        is_highlighted = []
+        in_highlight = False
+        i = 0
+        
+        while i < len(text):
+            char = text[i]
+            if char == '*':
+                in_highlight = not in_highlight
+                i += 1
+                continue
+            
+            if char in SYMBOLS_MAPPING:
+                text_norm.append(SYMBOLS_MAPPING[char])
+                # ^ directly after highlighted section should also be highlighted
+                if char == '^' and is_highlighted and is_highlighted[-1] == 1:
+                    is_highlighted.append(1)
+                else:
+                    is_highlighted.append(1 if in_highlight else 0)
+            i += 1
+        
+        return text_norm, is_highlighted
+    
+    def _process_russian_with_highlights(self, text):
+        """
+        Process Russian text: detect uppercase words (and ^ inside/after them) and mark as highlighted.
+        Then lowercase and convert to tokens.
+        """
+        text_norm = []
+        is_highlighted = []
+        
+        # First pass: identify highlighted positions based on uppercase words
+        highlight_positions = set()
+        i = 0
+        while i < len(text):
+            # Find word boundaries
+            if text[i].isalpha() or text[i] == '^':
+                word_start = i
+                while i < len(text) and (text[i].isalpha() or text[i] == '^'):
+                    i += 1
+                word_end = i
+                word = text[word_start:word_end]
+                
+                # Check if letters in word are all uppercase
+                letters = [c for c in word if c.isalpha()]
+                if letters and all(c.isupper() for c in letters):
+                    for j in range(word_start, word_end):
+                        highlight_positions.add(j)
+            else:
+                i += 1
+        
+        # Second pass: convert to tokens with highlight info
+        for i, char in enumerate(text):
+            char_lower = char.lower()
+            if char_lower in SYMBOLS_MAPPING:
+                text_norm.append(SYMBOLS_MAPPING[char_lower])
+                is_highlighted.append(1 if i in highlight_positions else 0)
+        
+        return text_norm, is_highlighted
+    
+    def _intersperse_emphasis(self, is_highlighted):
+        """
+        Intersperse emphasis values with blank token emphasis.
+        Blank tokens adjacent to emphasized tokens (before/after/inside word) get emphasis=1.
+        
+        For sequence [h0, h1, h2, ...] produces [b0, h0, b1, h1, b2, h2, ...]
+        where bi = 1 if hi or h(i-1) is 1, else 0
+        """
+        if not is_highlighted:
+            return [0]
+        
+        result = []
+        for i, h in enumerate(is_highlighted):
+            # Blank before this token: emphasized if current or previous token is emphasized
+            if i == 0:
+                blank_emphasis = h  # First blank: same as first token
+            else:
+                blank_emphasis = 1 if (is_highlighted[i-1] == 1 or h == 1) else 0
+            result.append(blank_emphasis)
+            result.append(h)
+        
+        # Final blank: same as last token
+        result.append(is_highlighted[-1])
+        
+        return result
 
     def get_sid(self, sid):
         sid = self.speaker_dict[sid]
@@ -214,16 +376,16 @@ class TextAudioSpeakerToneLangCollate():
         """Collate's training batch from normalized text, audio and speaker identities
         PARAMS
         ------
-        batch: [text_normalized, spec_normalized, wav_normalized, sid, tone_id, lid]
+        batch: [text_normalized, emphasis, spec_normalized, wav_normalized, sid, tone_id, lid]
         """
         # Right zero-pad all one-hot text sequences to max input length
         _, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([x[1].size(1) for x in batch]),
+            torch.LongTensor([x[2].size(1) for x in batch]),
             dim=0, descending=True)
 
         max_text_len = max([len(x[0]) for x in batch])
-        max_spec_len = max([x[1].size(1) for x in batch])
-        max_wav_len = max([x[2].size(1) for x in batch])
+        max_spec_len = max([x[2].size(1) for x in batch])
+        max_wav_len = max([x[3].size(1) for x in batch])
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
@@ -233,10 +395,12 @@ class TextAudioSpeakerToneLangCollate():
         lid = torch.LongTensor(len(batch))
 
         text_padded = torch.LongTensor(len(batch), max_text_len)
-        spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
+        emphasis_padded = torch.LongTensor(len(batch), max_text_len)
+        spec_padded = torch.FloatTensor(len(batch), batch[0][2].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
 
         text_padded.zero_()
+        emphasis_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
 
@@ -246,18 +410,105 @@ class TextAudioSpeakerToneLangCollate():
             text_padded[i, :text.size(0)] = text
             text_lengths[i] = text.size(0)
 
-            spec = row[1]
+            emphasis = row[1]
+            emphasis_padded[i, :emphasis.size(0)] = emphasis
+
+            spec = row[2]
             spec_padded[i, :, :spec.size(1)] = spec
             spec_lengths[i] = spec.size(1)
 
-            wav = row[2]
+            wav = row[3]
             wav_padded[i, :, :wav.size(1)] = wav
             wav_lengths[i] = wav.size(1)
 
-            sid[i] = row[3]
-            toneid[i] = row[4]
-            lid[i] = row[5]
+            sid[i] = row[4]
+            toneid[i] = row[5]
+            lid[i] = row[6]
 
         if self.return_ids:
-            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid, ids_sorted_decreasing
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid
+            return text_padded, text_lengths, emphasis_padded, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid, ids_sorted_decreasing
+        return text_padded, text_lengths, emphasis_padded, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid
+
+
+if __name__ == "__main__":
+    # Test get_text method using a mock class
+    print("=" * 60)
+    print("Testing get_text method with phonemization and highlighting")
+    print("=" * 60)
+    
+    # Reverse mapping for debugging
+    ID_TO_SYMBOL = {v: k for k, v in SYMBOLS_MAPPING.items()}
+    
+    # Create a minimal mock class to test get_text
+    class MockLoader:
+        def __init__(self, add_blank=False):
+            self.add_blank = add_blank
+        
+        # Copy the methods from TextAudioSpeakerToneLangLoader
+        get_text = TextAudioSpeakerToneLangLoader.get_text
+        _process_phonemized_with_highlights = TextAudioSpeakerToneLangLoader._process_phonemized_with_highlights
+        _process_russian_with_highlights = TextAudioSpeakerToneLangLoader._process_russian_with_highlights
+        _intersperse_emphasis = TextAudioSpeakerToneLangLoader._intersperse_emphasis
+    
+    loader = MockLoader(add_blank=False)
+    loader_with_blank = MockLoader(add_blank=True)
+    
+    def test_and_print(text, lid):
+        text_norm, is_highlighted = loader.get_text(text, lid)
+        symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+        
+        print(f"\nInput:        '{text}'")
+        print(f"Lang:         '{lid}'")
+        print(f"Symbols:      '{''.join(symbols_out)}'")
+        print(f"Token IDs:    {text_norm.tolist()}")
+        print(f"Is_highlight: {is_highlighted.tolist()}")
+        print(f"Length:       {len(text_norm)}")
+    
+    # Kyrgyz examples
+    kyrgyz_examples = [
+        ("салам", "ky"),
+        ("САЛАМ", "ky"),  # uppercase - should be highlighted
+        ("мен СЕНИ^ сүйөм", "ky"),  # mixed with ^ after uppercase
+        ("кыргызстан", "ky"),
+        ("салам , <yawn/> , кандайсың", "ky"),
+    ]
+    
+    # Russian examples  
+    russian_examples = [
+        ("привет", "ru"),
+        ("ПРИВЕТ", "ru"),  # uppercase - should be highlighted
+        ("я ТЕБЯ^ люблю", "ru"),  # mixed with ^ after uppercase
+        ("москва", "ru"),
+        ("привет , <yawn/> , как дела", "ru"),
+    ]
+    
+    print("\n--- Kyrgyz (phonemized) ---")
+    for text, lid in kyrgyz_examples:
+        test_and_print(text, lid)
+    
+    print("\n--- Russian (no phonemization) ---")
+    for text, lid in russian_examples:
+        test_and_print(text, lid)
+    
+    # Test with add_blank=True
+    print("\n" + "=" * 60)
+    print("Testing with add_blank=True")
+    print("=" * 60)
+    
+    def test_and_print_with_blank(text, lid):
+        text_norm, is_highlighted = loader_with_blank.get_text(text, lid)
+        symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+        
+        print(f"\nInput:        '{text}'")
+        print(f"Lang:         '{lid}'")
+        print(f"Token IDs:    {text_norm.tolist()}")
+        print(f"Is_highlight: {is_highlighted.tolist()}")
+        print(f"Length:       {len(text_norm)}")
+    
+    test_and_print_with_blank("ПРИВЕТ", "ru")
+    test_and_print_with_blank("я ТЕБЯ^ люблю", "ru")
+    
+    print("\n" + "=" * 60)
+    print(f"BLANK_TOKEN_ID: {BLANK_TOKEN_ID}")
+    print(f"Total symbols in mapping: {len(SYMBOLS_MAPPING)}")
+    print("=" * 60)

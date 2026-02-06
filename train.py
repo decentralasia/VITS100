@@ -300,18 +300,19 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     else:
         loader = train_loader
 
-    for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(loader):
+    for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(loader):
         if net_g.module.use_noise_scaled_mas:
             current_mas_noise_scale = net_g.module.mas_noise_scale_initial - net_g.module.noise_scale_delta * global_step
             net_g.module.current_mas_noise_scale = max(current_mas_noise_scale, 0.0)
         x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(rank, non_blocking=True)
+        emphasis = emphasis.cuda(rank, non_blocking=True)
         spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
         y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
         sid, tid, lid = sid.cuda(non_blocking=True), tid.cuda(non_blocking=True), lid.cuda(non_blocking=True)
 
         with autocast("cuda", enabled=hps.train.fp16_run):
             y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (
-                hidden_x, logw, logw_) = net_g(x, x_lengths, spec, spec_lengths, sid=sid, tid=tid, lid=lid)
+                hidden_x, logw, logw_) = net_g(x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid)
 
             if hps.model.use_mel_posterior_encoder or hps.data.use_mel_posterior_encoder:
                 mel = spec
@@ -580,15 +581,16 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     num_batches = 0
 
     with torch.no_grad():
-        for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(eval_loader):
+        for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(eval_loader):
             x, x_lengths = x.cuda(0), x_lengths.cuda(0)
+            emphasis = emphasis.cuda(0)
             spec, spec_lengths = spec.cuda(0), spec_lengths.cuda(0)
             y, y_lengths = y.cuda(0), y_lengths.cuda(0)
             sid, tid, lid = sid.cuda(0), tid.cuda(0), lid.cuda(0)
 
             # Forward pass through the model to compute losses
             y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
-                x, x_lengths, spec, spec_lengths, sid=sid, tid=tid, lid=lid
+                x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
             )
 
             # Compute mel spectrogram

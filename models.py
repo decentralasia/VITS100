@@ -1268,7 +1268,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
-class ReferenceEncoder(nn.Module):
+class ReferenceEncoderStyleVITSBert(nn.Module):
     """
     inputs --- [N, Ty/r, n_mels*r]  mels
     outputs --- [N, ref_enc_gru_size]
@@ -1330,6 +1330,97 @@ class ReferenceEncoder(nn.Module):
             L = (L - kernel_size + 2 * pad) // stride + 1
         return L
 
+
+class ReferenceEncoder(nn.Module):
+    """
+    Reference Encoder for voice cloning / style transfer.
+    Extracts a fixed-size embedding from a reference mel-spectrogram.
+
+    Architecture (from ONNX/PTH analysis):
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ Input: mel-spectrogram [batch, 80, time]                         │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Conv1d(80→32,  k=3, s=1, p=1) + LeakyReLU(0.3) + InstanceNorm(32)│
+    │ Conv1d(32→32,  k=3, s=1, p=1) + LeakyReLU(0.3) + InstanceNorm(32)│
+    │ Conv1d(32→64,  k=3, s=2, p=1) + LeakyReLU(0.3) + InstanceNorm(64)│ ↓
+    │ Conv1d(64→64,  k=3, s=1, p=1) + LeakyReLU(0.3) + InstanceNorm(64)│
+    │ Conv1d(64→128, k=3, s=2, p=1) + LeakyReLU(0.3) + InstanceNorm(128)│↓
+    │ Conv1d(128→256,k=3, s=1, p=1) + LeakyReLU(0.3) + InstanceNorm(256)│
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Transpose → [batch, time//4, 256]                                │
+    │ GRU(input=256, hidden=128, linear_before_reset=True)             │
+    │ Linear(128→384)                                                  │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ Output: style embedding [batch, 384]                             │
+    └──────────────────────────────────────────────────────────────────┘
+
+    Total parameters: 351,552
+    """
+
+    def __init__(self,
+                 n_mels: int = 80,
+                 gru_hidden: int = 128,
+                 out_channels: int = 384):
+        super().__init__()
+
+        # Conv layers: (in_channels, out_channels, kernel_size, stride)
+        conv_configs = [
+            (n_mels, 32, 3, 1),  # conv 0
+            (32, 32, 3, 1),  # conv 1
+            (32, 64, 3, 2),  # conv 2 - downsample
+            (64, 64, 3, 1),  # conv 3
+            (64, 128, 3, 2),  # conv 4 - downsample
+            (128, 256, 3, 1),  # conv 5
+        ]
+
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        for in_ch, out_ch, kernel, stride in conv_configs:
+            self.convs.append(
+                nn.Conv1d(in_ch, out_ch, kernel_size=kernel,
+                          stride=stride, padding=kernel // 2, bias=True)
+            )
+            self.norms.append(nn.InstanceNorm1d(out_ch, affine=True))
+
+        # GRU: processes temporal sequence after convolutions
+        self.gru = nn.GRU(
+            input_size=256,  # last conv output channels
+            hidden_size=gru_hidden,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False
+        )
+
+        # Final projection to embedding dimension
+        self.lin_layer = nn.Linear(gru_hidden, out_channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        TensorRT-optimized forward pass (no dynamic control flow).
+
+        Args:
+            x: mel-spectrogram [batch, n_mels, time]
+
+        Returns:
+            embedding: style embedding [batch, out_channels]
+        """
+        # Conv stack: conv → leaky_relu → norm (unrolled for TensorRT fusion)
+        x = self.norms[0](F.leaky_relu(self.convs[0](x), 0.3))
+        x = self.norms[1](F.leaky_relu(self.convs[1](x), 0.3))
+        x = self.norms[2](F.leaky_relu(self.convs[2](x), 0.3))
+        x = self.norms[3](F.leaky_relu(self.convs[3](x), 0.3))
+        x = self.norms[4](F.leaky_relu(self.convs[4](x), 0.3))
+        x = self.norms[5](F.leaky_relu(self.convs[5](x), 0.3))
+
+        # [batch, 256, time] → [batch, time, 256]
+        x = x.transpose(1, 2)
+
+        # GRU: take final hidden state
+        _, hidden = self.gru(x)
+
+        # [1, batch, 128] → [batch, 384]
+        return self.lin_layer(hidden.squeeze(0))
 
 class SynthesizerTrn(nn.Module):
     """
@@ -1473,6 +1564,7 @@ class SynthesizerTrn(nn.Module):
         self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
         self.emb_tone = nn.Embedding(n_tones, gin_channels)
         self.emb_language = nn.Embedding(n_languages, gin_channels)
+        self.emb_emphasis = nn.Embedding(2, gin_channels)
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(4 * gin_channels, gin_channels, 1)
 
@@ -1543,15 +1635,27 @@ class SynthesizerTrn(nn.Module):
         
         return g
 
+    def _build_g_5(self, reference_emb):
+        g = self.g_proj(reference_emb)  # [B, gin_channels, 1]
+        return g
 
-    def forward(self, x, x_lengths, y, y_lengths, sid=None, tid=None, lid=None):
+
+    def forward(self, x, x_lengths, y, y_lengths, emphasis, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
         reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
-        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+        g = self._build_g_5(reference_emb=reference_emb)
+
+        # Get emphasis embeddings and add to conditioning
+        # emphasis: [B, T] -> emb_emphasis: [B, T, gin_channels] -> [B, gin_channels, T]
+        emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
+        
+        # Add emphasis embedding to encoder output (token-level conditioning)
+        x = x + emph_emb * x_mask
+        
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
 
@@ -1605,7 +1709,7 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, y, noise_scale=1., noise_scale_w=1., length_scale = 1., sid=None, tid=None, lid=None, max_len=None):
+    def infer(self, x, y, emphasis=None, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
         reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
 
@@ -1613,6 +1717,12 @@ class SynthesizerTrn(nn.Module):
         g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
+        
+        # Add emphasis embedding if provided
+        if emphasis is not None:
+            emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
+            x = x + emph_emb * x_mask
+        
         logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
