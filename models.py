@@ -1721,7 +1721,7 @@ class SynthesizerTrn(nn.Module):
         # Add emphasis embedding if provided
         if emphasis is not None:
             emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
-            x = x + emph_emb
+            x = x + emph_emb * x_mask
         
         logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
