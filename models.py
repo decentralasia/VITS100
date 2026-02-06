@@ -1642,7 +1642,7 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, y, y_lengths, emphasis, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        reference_emb = self.ref_enc(y).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)

@@ -31,7 +31,6 @@ EXHALE_TOKEN_ID = max(SYMBOLS_MAPPING.values()) + 1
 with open(_TRANSLITERATION_MAPPING_PATH, "r", encoding="utf-8") as f:
     TRANSLITERATION_MAPPING = json.load(f)
 
-print(_FST_PATH)
 # Initialize Kyrgyz phonemizer
 KYRGYZ_PHONEMIZER = KyrgyzToIpaV2(
     symbols_mapping=SYMBOLS_MAPPING,
