@@ -17,7 +17,7 @@ from collections import defaultdict
 
 # Valid symbols definition
 _pad = '_'
-_punctuation = '!? ^,;.-'
+_punctuation = '!? ^,;.'
 _kyrgyz_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
 _russian_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя'
 
