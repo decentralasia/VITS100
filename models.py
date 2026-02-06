@@ -1711,17 +1711,17 @@ class SynthesizerTrn(nn.Module):
 
     def infer(self, x, y, emphasis=None, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
-        reference_emb = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        reference_emb = self.ref_enc(y).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
-        g = self._build_g(sid=sid, tid=tid, lid=lid, reference_emb=reference_emb)
+        g = self._build_g_5(reference_emb=reference_emb)
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
         
         # Add emphasis embedding if provided
         if emphasis is not None:
             emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
-            x = x + emph_emb * x_mask
+            x = x + emph_emb
         
         logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
