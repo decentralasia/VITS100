@@ -1564,7 +1564,8 @@ class SynthesizerTrn(nn.Module):
         # self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
         # self.emb_tone = nn.Embedding(n_tones, gin_channels)
         # self.emb_language = nn.Embedding(n_languages, gin_channels)
-        self.emb_emphasis = nn.Embedding(2, gin_channels)
+        # emb_emphasis uses hidden_channels to match enc_p output (x) dimension
+        self.emb_emphasis = nn.Embedding(2, hidden_channels)
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(384, gin_channels, 1)
 
@@ -1648,8 +1649,8 @@ class SynthesizerTrn(nn.Module):
         g = self._build_g_5(reference_emb=reference_emb)
 
         # Get emphasis embeddings and add to conditioning
-        # emphasis: [B, T] -> emb_emphasis: [B, T, gin_channels] -> [B, gin_channels, T]
-        emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
+        # emphasis: [B, T] -> emb_emphasis: [B, T, hidden_channels] -> [B, hidden_channels, T]
+        emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, hidden_channels, T]
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
         
@@ -1720,7 +1721,7 @@ class SynthesizerTrn(nn.Module):
         
         # Add emphasis embedding if provided
         if emphasis is not None:
-            emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, gin_channels, T]
+            emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, hidden_channels, T]
             x = x + emph_emb * x_mask
         
         logw = self.dp(x, x_mask, g=g)
