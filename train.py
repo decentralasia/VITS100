@@ -3,6 +3,7 @@ import json
 import argparse
 import itertools
 import math
+import heapq
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
@@ -28,6 +29,10 @@ from models import (
     AVAILABLE_FLOW_TYPES,
     AVAILABLE_DURATION_DISCRIMINATOR_TYPES
 )
+
+# Global list to track top 3 best checkpoints by validation loss
+# Each entry is (val_loss, global_step) - using negative loss for max-heap behavior
+best_checkpoints = []
 from losses import (
     generator_loss,
     discriminator_loss,
@@ -484,24 +489,48 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 #     scalars=scalar_dict)
 
             if global_step % hps.train.eval_interval == 0:
-                evaluate(hps, net_g, eval_loader, writer_eval)
-                utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
-                                      os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
-                utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
-                                      os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
-                if net_dur_disc is not None:
-                    utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
-                                          os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
-
-                prev_g = os.path.join(hps.model_dir, "G_{}.pth".format(global_step - 3 * hps.train.eval_interval))
-                if os.path.exists(prev_g):
-                    os.remove(prev_g)
-                    prev_d = os.path.join(hps.model_dir, "D_{}.pth".format(global_step - 3 * hps.train.eval_interval))
-                    if os.path.exists(prev_d):
-                        os.remove(prev_d)
-                        prev_dur = os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step - 3 * hps.train.eval_interval))
-                        if os.path.exists(prev_dur):
-                            os.remove(prev_dur)
+                global best_checkpoints
+                val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
+                
+                # Determine if this checkpoint should be saved (top 3 by smallest val_loss)
+                should_save = False
+                step_to_remove = None
+                
+                if len(best_checkpoints) < 3:
+                    # Less than 3 checkpoints, always save
+                    should_save = True
+                    heapq.heappush(best_checkpoints, (-val_loss, global_step))
+                else:
+                    # Check if current val_loss is better than the worst in top 3
+                    worst_loss, worst_step = best_checkpoints[0]  # max-heap: worst = highest (most negative)
+                    worst_loss = -worst_loss  # convert back to positive
+                    
+                    if val_loss < worst_loss:
+                        should_save = True
+                        # Remove the worst checkpoint
+                        heapq.heappop(best_checkpoints)
+                        step_to_remove = worst_step
+                        heapq.heappush(best_checkpoints, (-val_loss, global_step))
+                
+                if should_save:
+                    logger.info(f"Saving checkpoint at step {global_step} with val_loss={val_loss:.6f}")
+                    utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
+                                          os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
+                    utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
+                                          os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
+                    if net_dur_disc is not None:
+                        utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
+                                              os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
+                    
+                    # Remove old checkpoint if needed
+                    if step_to_remove is not None:
+                        logger.info(f"Removing checkpoint at step {step_to_remove} (worse val_loss)")
+                        for prefix in ["G_", "D_", "DUR_"]:
+                            old_ckpt = os.path.join(hps.model_dir, f"{prefix}{step_to_remove}.pth")
+                            if os.path.exists(old_ckpt):
+                                os.remove(old_ckpt)
+                else:
+                    logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
 
         global_step += 1
 
@@ -697,6 +726,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     wandb.log(wandb_eval_dict, step=global_step)
 
     generator.train()
+    
+    # Return total validation loss for checkpoint selection
+    total_val_loss = avg_mel_loss * hps.train.c_mel + avg_kl_loss * hps.train.c_kl + avg_dur_loss
+    return total_val_loss
 
 # sed -i 's/\xC2\xA0/ /g' file.txt
 # sed -i "s/<inhаl>е>/<inhale>/g" DUMMY1/train_filtered_manifest.txt

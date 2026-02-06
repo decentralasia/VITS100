@@ -1561,9 +1561,9 @@ class SynthesizerTrn(nn.Module):
 
         self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
         # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
-        self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
-        self.emb_tone = nn.Embedding(n_tones, gin_channels)
-        self.emb_language = nn.Embedding(n_languages, gin_channels)
+        # self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
+        # self.emb_tone = nn.Embedding(n_tones, gin_channels)
+        # self.emb_language = nn.Embedding(n_languages, gin_channels)
         self.emb_emphasis = nn.Embedding(2, gin_channels)
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(384, gin_channels, 1)
