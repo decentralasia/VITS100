@@ -26,8 +26,8 @@ VALID_SYMBOLS = set(_pad + _punctuation + _kyrgyz_letters + _russian_letters)
 
 # Allowed tags (only these tags with latin characters are permitted)
 ALLOWED_TAGS = {
-    '<yawn>', '<cough>', '<inhale>', '<emphasis>',
-    '<yawn/>', '<cough/>', '<inhale/>', '<emphasis/>',
+    '<yawn>', '<cough>', '<inhale>', '<exhale>', '<emphasis>',
+    '<yawn/>', '<cough/>', '<inhale/>', '<exhale/>', '<emphasis/>',
 }
 
 # Pattern for pause tag with variable time: <pause time="500ms"/>
