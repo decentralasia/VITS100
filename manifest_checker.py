@@ -24,6 +24,15 @@ _russian_letters = 'АБВГДЕЁЖЗИЙКЛМНҢОӨПРСТУҮФХЦЧШЩ
 # Combined valid symbols set
 VALID_SYMBOLS = set(_pad + _punctuation + _kyrgyz_letters + _russian_letters)
 
+# Allowed tags (only these tags with latin characters are permitted)
+ALLOWED_TAGS = {
+    '<yawn>', '<cough>', '<inhale>', '<emphasis>',
+    '<yawn/>', '<cough/>', '<inhale/>', '<emphasis/>',
+}
+
+# Pattern for pause tag with variable time: <pause time="500ms"/>
+PAUSE_TAG_PATTERN = re.compile(r'^<pause\s+time="\d+ms"\s*/>$')
+
 # Tag pattern: matches <tag>, </tag>, <tag attr="value"/>
 TAG_PATTERN = re.compile(r'<[^>]+/?>')
 
@@ -46,14 +55,32 @@ def get_tags(text):
     """Extract all tags from text."""
     return TAG_PATTERN.findall(text)
 
+def is_valid_tag(tag):
+    """Check if a tag is valid (in ALLOWED_TAGS or matches pause pattern)."""
+    if tag in ALLOWED_TAGS:
+        return True
+    if PAUSE_TAG_PATTERN.match(tag):
+        return True
+    return False
+
 def check_text(text, valid_symbols, line_num, filepath):
     """
     Check if text contains only valid symbols.
-    Latin characters are only allowed inside tags.
+    Latin characters are only allowed inside specific tags.
     
     Returns list of error messages.
     """
     errors = []
+    
+    # Check for invalid tags
+    tags_in_text = get_tags(text)
+    for tag in tags_in_text:
+        if not is_valid_tag(tag):
+            errors.append(
+                f"Line {line_num}: Invalid tag '{tag}'. "
+                f"Allowed: {ALLOWED_TAGS} or <pause time=\"Nms\"/>. "
+                f"File: {filepath}, Text: '{text[:50]}...'"
+            )
     
     # Get text without tags (latin is NOT allowed here)
     text_without_tags = remove_tags(text)
@@ -131,6 +158,7 @@ def main():
     
     print(f"Valid symbols: {len(VALID_SYMBOLS)} characters")
     print(f"Includes: pad, punctuation ({_punctuation}), Kyrgyz/Russian letters")
+    print(f"Allowed tags: {ALLOWED_TAGS}")
     
     # Check manifest
     print(f"\n{'='*60}")
