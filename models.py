@@ -1566,7 +1566,7 @@ class SynthesizerTrn(nn.Module):
         self.emb_language = nn.Embedding(n_languages, gin_channels)
         self.emb_emphasis = nn.Embedding(2, gin_channels)
         # Project concatenated embeddings back to gin_channels
-        self.g_proj = nn.Conv1d(4 * gin_channels, gin_channels, 1)
+        self.g_proj = nn.Conv1d(384, gin_channels, 1)
 
 
     def _build_g(self, sid, tid, lid, reference_emb):
