@@ -483,6 +483,7 @@ def print_random_phonemized_samples(manifest_path: str, num_samples: int = 32):
             phonemized = clean_spaces(phonemized).strip()
         
         # Convert to token IDs
+        phonemized = phonemized.lower()
         token_ids = symbols_to_ids(phonemized)
         symbols_out = [ID_TO_SYMBOL.get(tid, f'[{tid}]') for tid in token_ids]
         
