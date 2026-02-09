@@ -474,6 +474,7 @@ def print_random_phonemized_samples(manifest_path: str, num_samples: int = 32):
             text = text.replace(tag, symbol)
 
         print("kokoko     ", text)
+        text = text.lower()
         if is_kyrgyz:
             phonemized = KYRGYZ_PHONEMIZER.phonemize(text)
             phonemized = collapse_whitespace(phonemized)
@@ -484,7 +485,6 @@ def print_random_phonemized_samples(manifest_path: str, num_samples: int = 32):
             phonemized = clean_spaces(phonemized).strip()
         
         # Convert to token IDs
-        phonemized = phonemized.lower()
         token_ids = symbols_to_ids(phonemized)
         symbols_out = [ID_TO_SYMBOL.get(tid, f'[{tid}]') for tid in token_ids]
         
