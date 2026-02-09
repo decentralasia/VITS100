@@ -656,8 +656,12 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык'
     ru_text = 'бишкек столица кыргызстана'
     device = generator.device
-    ky_text, is_highlighted_ky = eval_loader.get_text(ky_text, lid="ky").to(device).unsqueeze(0)
-    ru_text, is_highlighted_ru = eval_loader.get_text(ru_text, lid="ru").to(device).unsqueeze(0)
+    ky_text, is_highlighted_ky = eval_loader.dataset.get_text(ky_text, lid="ky")
+    ky_text = ky_text.to(device).unsqueeze(0)
+    is_highlighted_ky = is_highlighted_ky.to(device).unsqueeze(0)
+    ru_text, is_highlighted_ru = eval_loader.dataset.get_text(ru_text, lid="ru")
+    ru_text = ru_text.to(device).unsqueeze(0)
+    is_highlighted_ru = is_highlighted_ru.to(device).unsqueeze(0)
 
     sid_0 = torch.LongTensor([0]).to(device)
     sid_1 = torch.LongTensor([1]).to(device)
