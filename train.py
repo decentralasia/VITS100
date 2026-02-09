@@ -537,17 +537,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if rank == 0:
         logger.info('====> Epoch: {}'.format(epoch))
 
-from text import text_to_sequence
-import commons
 import torchaudio
-
-def get_text(text, hps, lid):
-    lang_code = "ky" if lid == 0 else "ru"
-    text_norm = text_to_sequence(text, hps.data.text_cleaners, lang_code)
-    if hps.data.add_blank:
-        text_norm = commons.intersperse(text_norm, 0)
-    text_norm = torch.LongTensor(text_norm)
-    return text_norm
 
 def file_to_mel(file_path,
                 target_sr=22050,
@@ -663,11 +653,11 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     avg_kl_loss = total_kl_loss / num_batches
     avg_dur_loss = total_dur_loss / num_batches
 
-    ky_text = ' рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай , курулуш , транспорт , соода же тейлөөнүн башка тармактарына таандык . '
-    ru_text = ' бишкек столица кыргызстана '
+    ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык'
+    ru_text = 'бишкек столица кыргызстана'
     device = generator.device
-    ky_text = get_text(ky_text, hps, lid=0).to(device).unsqueeze(0)
-    ru_text = get_text(ru_text, hps, lid=1).to(device).unsqueeze(0)
+    ky_text, is_highlighted_ky = eval_loader.get_text(ky_text, lid="ky").to(device).unsqueeze(0)
+    ru_text, is_highlighted_ru = eval_loader.get_text(ru_text, lid="ru").to(device).unsqueeze(0)
 
     sid_0 = torch.LongTensor([0]).to(device)
     sid_1 = torch.LongTensor([1]).to(device)
@@ -687,10 +677,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
 
     with torch.no_grad():
-        audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
 
 
     # Log validation metrics to wandb
