@@ -314,6 +314,9 @@ class TextEncoder(nn.Module):
         self.gin_channels = gin_channels
         self.emb = nn.Embedding(n_vocab, hidden_channels)
         nn.init.normal_(self.emb.weight, 0.0, hidden_channels ** -0.5)
+        
+        # Emphasis embedding: 0 = normal, 1 = emphasized
+        self.emb_emphasis = nn.Embedding(2, hidden_channels)
 
         self.encoder = attentions.Encoder(
             hidden_channels,
@@ -325,8 +328,14 @@ class TextEncoder(nn.Module):
             gin_channels=self.gin_channels)
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths, g=None):
+    def forward(self, x, x_lengths, emphasis=None, g=None):
         x = self.emb(x) * math.sqrt(self.hidden_channels)  # [b, t, h]
+        
+        # Add emphasis embedding if provided
+        if emphasis is not None:
+            emph_emb = self.emb_emphasis(emphasis)  # [b, t, h]
+            x = x + emph_emb
+        
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
 
@@ -1564,8 +1573,6 @@ class SynthesizerTrn(nn.Module):
         # self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
         # self.emb_tone = nn.Embedding(n_tones, gin_channels)
         # self.emb_language = nn.Embedding(n_languages, gin_channels)
-        # emb_emphasis uses hidden_channels to match enc_p output (x) dimension
-        self.emb_emphasis = nn.Embedding(2, hidden_channels)
         # Project concatenated embeddings back to gin_channels
         self.g_proj = nn.Conv1d(384, gin_channels, 1)
 
@@ -1648,14 +1655,8 @@ class SynthesizerTrn(nn.Module):
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)
 
-        # Get emphasis embeddings and add to conditioning
-        # emphasis: [B, T] -> emb_emphasis: [B, T, hidden_channels] -> [B, hidden_channels, T]
-        emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, hidden_channels, T]
-
-        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)  # vits2?
-        
-        # Add emphasis embedding to encoder output (token-level conditioning)
-        x = x + emph_emb * x_mask
+        # Pass emphasis to enc_p - emphasis is added to token embeddings inside TextEncoder
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emphasis=emphasis, g=g)
         
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
@@ -1710,19 +1711,15 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, y, emphasis=None, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
+    def infer(self, x, y, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
         reference_emb = self.ref_enc(y).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)
 
-        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, g=g)
-        
-        # Add emphasis embedding if provided
-        if emphasis is not None:
-            emph_emb = self.emb_emphasis(emphasis).transpose(1, 2)  # [B, hidden_channels, T]
-            x = x + emph_emb * x_mask
+        # Pass emphasis to enc_p - emphasis is added to token embeddings inside TextEncoder
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emphasis=emphasis, g=g)
         
         logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
