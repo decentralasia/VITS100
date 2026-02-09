@@ -682,8 +682,8 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     with torch.no_grad():
         audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
         audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
 
 
