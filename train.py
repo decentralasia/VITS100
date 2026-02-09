@@ -403,7 +403,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         scaler.update()
 
         if rank == 0:
-            if global_step % hps.train.log_interval == 0:
+            if global_step != 0 and global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]['lr']
 
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
@@ -488,7 +488,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 #     images=image_dict,
                 #     scalars=scalar_dict)
 
-            if global_step % hps.train.eval_interval == 0:
+            if global_step != 0 and global_step % hps.train.eval_interval == 0:
                 global best_checkpoints
                 val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
                 
