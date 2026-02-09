@@ -60,7 +60,7 @@ def clean_spaces(text: str) -> str:
 
 def symbols_to_ids(text: str) -> list:
     """Convert symbols to token IDs using the symbols mapping."""
-    return [SYMBOLS_MAPPING[symb] for symb in text if symb in SYMBOLS_MAPPING]
+    return [SYMBOLS_MAPPING[symb] for symb in text]
 
 class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
     """
