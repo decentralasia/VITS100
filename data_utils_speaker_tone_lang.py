@@ -430,85 +430,162 @@ class TextAudioSpeakerToneLangCollate():
         return text_padded, text_lengths, emphasis_padded, spec_padded, spec_lengths, wav_padded, wav_lengths, sid, toneid, lid
 
 
-if __name__ == "__main__":
-    # Test get_text method using a mock class
-    print("=" * 60)
-    print("Testing get_text method with phonemization and highlighting")
-    print("=" * 60)
+def print_random_phonemized_samples(manifest_path: str, num_samples: int = 32):
+    """
+    Read a manifest file and print random samples with their phonemized text.
+    
+    Args:
+        manifest_path: Path to the manifest file (format: audiopath|speaker|tone|lang|real_text|phonemized_text)
+        num_samples: Number of random samples to print (default: 32)
+    """
+    from utils import load_filepaths_and_text
+    
+    # Load manifest
+    data = load_filepaths_and_text(manifest_path)
+    
+    if len(data) == 0:
+        print(f"No data found in manifest: {manifest_path}")
+        return
+    
+    # Sample random entries
+    sample_size = min(num_samples, len(data))
+    samples = random.sample(data, sample_size)
     
     # Reverse mapping for debugging
     ID_TO_SYMBOL = {v: k for k, v in SYMBOLS_MAPPING.items()}
     
-    # Create a minimal mock class to test get_text
-    class MockLoader:
-        def __init__(self, add_blank=False):
-            self.add_blank = add_blank
+    print("=" * 80)
+    print(f"Random {sample_size} Phonemized Samples from: {manifest_path}")
+    print("=" * 80)
+    
+    for idx, entry in enumerate(samples, 1):
+        audiopath, sid, tone, lid, real_text, phonemized_text = entry
         
-        # Copy the methods from TextAudioSpeakerToneLangLoader
-        get_text = TextAudioSpeakerToneLangLoader.get_text
-        _process_phonemized_with_highlights = TextAudioSpeakerToneLangLoader._process_phonemized_with_highlights
-        _process_russian_with_highlights = TextAudioSpeakerToneLangLoader._process_russian_with_highlights
-        _intersperse_emphasis = TextAudioSpeakerToneLangLoader._intersperse_emphasis
-    
-    loader = MockLoader(add_blank=False)
-    loader_with_blank = MockLoader(add_blank=True)
-    
-    def test_and_print(text, lid):
-        text_norm, is_highlighted = loader.get_text(text, lid)
-        symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+        # Phonemize the text
+        is_kyrgyz = lid in ('kg', 'ky')
         
-        print(f"\nInput:        '{text}'")
-        print(f"Lang:         '{lid}'")
-        print(f"Symbols:      '{''.join(symbols_out)}'")
-        print(f"Token IDs:    {text_norm.tolist()}")
-        print(f"Is_highlight: {is_highlighted.tolist()}")
-        print(f"Length:       {len(text_norm)}")
-    
-    # Kyrgyz examples
-    kyrgyz_examples = [
-        ("салам", "ky"),
-        ("САЛАМ", "ky"),  # uppercase - should be highlighted
-        ("мен СЕНИ^ сүйөм", "ky"),  # mixed with ^ after uppercase
-        ("кыргызстан", "ky"),
-        ("салам , <yawn/> , кандайсың", "ky"),
-    ]
-    
-    # Russian examples  
-    russian_examples = [
-        ("привет", "ru"),
-        ("ПРИВЕТ", "ru"),  # uppercase - should be highlighted
-        ("я ТЕБЯ^ люблю", "ru"),  # mixed with ^ after uppercase
-        ("москва", "ru"),
-        ("привет , <yawn/> , как дела", "ru"),
-    ]
-    
-    print("\n--- Kyrgyz (phonemized) ---")
-    for text, lid in kyrgyz_examples:
-        test_and_print(text, lid)
-    
-    print("\n--- Russian (no phonemization) ---")
-    for text, lid in russian_examples:
-        test_and_print(text, lid)
-    
-    # Test with add_blank=True
-    print("\n" + "=" * 60)
-    print("Testing with add_blank=True")
-    print("=" * 60)
-    
-    def test_and_print_with_blank(text, lid):
-        text_norm, is_highlighted = loader_with_blank.get_text(text, lid)
-        symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+        # Add @ at the beginning if not present
+        text = real_text
+        if not text.startswith("@"):
+            text = "@" + text
         
-        print(f"\nInput:        '{text}'")
-        print(f"Lang:         '{lid}'")
-        print(f"Token IDs:    {text_norm.tolist()}")
-        print(f"Is_highlight: {is_highlighted.tolist()}")
-        print(f"Length:       {len(text_norm)}")
+        # Replace paralinguistic tags with special symbols
+        for tag, symbol in MAPPING_SOUND.items():
+            text = text.replace(tag, symbol)
+        
+        if is_kyrgyz:
+            phonemized = KYRGYZ_PHONEMIZER.phonemize(text)
+            phonemized = collapse_whitespace(phonemized)
+            phonemized = clean_spaces(phonemized).strip()
+        else:
+            # Russian text: just clean
+            phonemized = collapse_whitespace(text)
+            phonemized = clean_spaces(phonemized).strip()
+        
+        # Convert to token IDs
+        token_ids = symbols_to_ids(phonemized)
+        symbols_out = [ID_TO_SYMBOL.get(tid, f'[{tid}]') for tid in token_ids]
+        
+        print(f"\n[{idx:02d}] Speaker: {sid} | Tone: {tone} | Lang: {lid}")
+        print(f"     Original:   {real_text}")
+        print(f"     Phonemized: {phonemized}")
+        print(f"     Symbols:    {''.join(symbols_out)}")
+        print(f"     Token IDs:  {token_ids[:20]}{'...' if len(token_ids) > 20 else ''}")
     
-    test_and_print_with_blank("ПРИВЕТ", "ru")
-    test_and_print_with_blank("я ТЕБЯ^ люблю", "ru")
+    print("\n" + "=" * 80)
+    print(f"Printed {sample_size} random samples")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    import argparse
     
-    print("\n" + "=" * 60)
-    print(f"BLANK_TOKEN_ID: {BLANK_TOKEN_ID}")
-    print(f"Total symbols in mapping: {len(SYMBOLS_MAPPING)}")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Test phonemization or print random samples from manifest")
+    parser.add_argument("--manifest", type=str, help="Path to manifest file to print random phonemized samples")
+    parser.add_argument("--num_samples", type=int, default=32, help="Number of random samples to print (default: 32)")
+    args = parser.parse_args()
+    
+    if args.manifest:
+        print_random_phonemized_samples(args.manifest, args.num_samples)
+    else:
+        # Test get_text method using a mock class
+        print("=" * 60)
+        print("Testing get_text method with phonemization and highlighting")
+        print("=" * 60)
+        
+        # Reverse mapping for debugging
+        ID_TO_SYMBOL = {v: k for k, v in SYMBOLS_MAPPING.items()}
+        
+        # Create a minimal mock class to test get_text
+        class MockLoader:
+            def __init__(self, add_blank=False):
+                self.add_blank = add_blank
+            
+            # Copy the methods from TextAudioSpeakerToneLangLoader
+            get_text = TextAudioSpeakerToneLangLoader.get_text
+            _process_phonemized_with_highlights = TextAudioSpeakerToneLangLoader._process_phonemized_with_highlights
+            _process_russian_with_highlights = TextAudioSpeakerToneLangLoader._process_russian_with_highlights
+            _intersperse_emphasis = TextAudioSpeakerToneLangLoader._intersperse_emphasis
+        
+        loader = MockLoader(add_blank=False)
+        loader_with_blank = MockLoader(add_blank=True)
+        
+        def test_and_print(text, lid):
+            text_norm, is_highlighted = loader.get_text(text, lid)
+            symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+            
+            print(f"\nInput:        '{text}'")
+            print(f"Lang:         '{lid}'")
+            print(f"Symbols:      '{''.join(symbols_out)}'")
+            print(f"Token IDs:    {text_norm.tolist()}")
+            print(f"Is_highlight: {is_highlighted.tolist()}")
+            print(f"Length:       {len(text_norm)}")
+        
+        # Kyrgyz examples
+        kyrgyz_examples = [
+            ("салам", "ky"),
+            ("САЛАМ", "ky"),  # uppercase - should be highlighted
+            ("мен СЕНИ^ сүйөм", "ky"),  # mixed with ^ after uppercase
+            ("кыргызстан", "ky"),
+            ("салам , <yawn/> , кандайсың", "ky"),
+        ]
+        
+        # Russian examples  
+        russian_examples = [
+            ("привет", "ru"),
+            ("ПРИВЕТ", "ru"),  # uppercase - should be highlighted
+            ("я ТЕБЯ^ люблю", "ru"),  # mixed with ^ after uppercase
+            ("москва", "ru"),
+            ("привет , <yawn/> , как дела", "ru"),
+        ]
+        
+        print("\n--- Kyrgyz (phonemized) ---")
+        for text, lid in kyrgyz_examples:
+            test_and_print(text, lid)
+        
+        print("\n--- Russian (no phonemization) ---")
+        for text, lid in russian_examples:
+            test_and_print(text, lid)
+        
+        # Test with add_blank=True
+        print("\n" + "=" * 60)
+        print("Testing with add_blank=True")
+        print("=" * 60)
+        
+        def test_and_print_with_blank(text, lid):
+            text_norm, is_highlighted = loader_with_blank.get_text(text, lid)
+            symbols_out = [ID_TO_SYMBOL.get(i.item(), f'[{i.item()}]') for i in text_norm]
+            
+            print(f"\nInput:        '{text}'")
+            print(f"Lang:         '{lid}'")
+            print(f"Token IDs:    {text_norm.tolist()}")
+            print(f"Is_highlight: {is_highlighted.tolist()}")
+            print(f"Length:       {len(text_norm)}")
+        
+        test_and_print_with_blank("ПРИВЕТ", "ru")
+        test_and_print_with_blank("я ТЕБЯ^ люблю", "ru")
+        
+        print("\n" + "=" * 60)
+        print(f"BLANK_TOKEN_ID: {BLANK_TOKEN_ID}")
+        print(f"Total symbols in mapping: {len(SYMBOLS_MAPPING)}")
+        print("=" * 60)
