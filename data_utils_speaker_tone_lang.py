@@ -473,6 +473,7 @@ def print_random_phonemized_samples(manifest_path: str, num_samples: int = 32):
         for tag, symbol in MAPPING_SOUND.items():
             text = text.replace(tag, symbol)
 
+        print("kokoko     ", text)
         if is_kyrgyz:
             phonemized = KYRGYZ_PHONEMIZER.phonemize(text)
             phonemized = collapse_whitespace(phonemized)
