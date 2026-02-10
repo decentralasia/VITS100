@@ -1390,7 +1390,7 @@ class ReferenceEncoder(nn.Module):
                 nn.Conv1d(in_ch, out_ch, kernel_size=kernel,
                           stride=stride, padding=kernel // 2, bias=True)
             )
-            self.norms.append(nn.BatchNorm1d(out_ch))
+            self.norms.append(nn.InstanceNorm1d(out_ch, affine=True))
 
         # GRU: processes temporal sequence after convolutions
         self.gru = nn.GRU(
@@ -1648,9 +1648,9 @@ class SynthesizerTrn(nn.Module):
         return g
 
 
-    def forward(self, x, x_lengths, y, y_lengths, emphasis, sid=None, tid=None, lid=None):
+    def forward(self, x, x_lengths, spec, spec_lengths, emphasis, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        reference_emb = self.ref_enc(y).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)
@@ -1658,7 +1658,7 @@ class SynthesizerTrn(nn.Module):
         # Pass emphasis to enc_p - emphasis is added to token embeddings inside TextEncoder
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emphasis=emphasis, g=g)
         
-        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
+        z, m_q, logs_q, y_mask = self.enc_q(spec, spec_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
 
         with torch.no_grad():
@@ -1707,13 +1707,13 @@ class SynthesizerTrn(nn.Module):
         m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)
         logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
 
-        z_slice, ids_slice = commons.rand_slice_segments(z, y_lengths, self.segment_size)
+        z_slice, ids_slice = commons.rand_slice_segments(z, spec_lengths, self.segment_size)
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, y, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
+    def infer(self, x, spec, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
-        reference_emb = self.ref_enc(y).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)

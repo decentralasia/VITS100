@@ -114,6 +114,7 @@ def run(rank, n_gpus, hps):
         #[371, 489, 605, 714, 831, 954, 1092, 1251, 1452, 1706, 3885],
         #[654, 814, 994, 1168, 1346, 1547, 1735, 1907, 2273],
         [414, 546, 687, 828, 974, 1141, 1355, 1636, 4077],
+        #[1000, 2000],
         num_replicas=n_gpus,
         rank=rank,
         shuffle=True)
@@ -304,7 +305,6 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         loader = tqdm.tqdm(train_loader, desc='Loading training data')
     else:
         loader = train_loader
-
     for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(loader):
         if net_g.module.use_noise_scaled_mas:
             current_mas_noise_scale = net_g.module.mas_noise_scale_initial - net_g.module.noise_scale_delta * global_step
