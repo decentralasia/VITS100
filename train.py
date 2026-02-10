@@ -243,7 +243,7 @@ def run(rank, n_gpus, hps):
             _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, "DUR_*.pth"),
                                                        net_dur_disc, optim_dur_disc)
         # epoch_str is actually the iteration/global_step from the checkpoint
-        global_step = epoch_str
+        global_step = epoch_str + 1  # +1 to avoid re-triggering eval/log at the resumed step
         epoch_str = max(1, global_step // len(train_loader))
         if rank == 0:
             logger.info(f"Resuming from global_step: {global_step}, epoch: {epoch_str}")
