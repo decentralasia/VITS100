@@ -141,10 +141,10 @@ def run(rank, n_gpus, hps):
     if "use_spk_conditioned_encoder" in hps.model.keys() and hps.model.use_spk_conditioned_encoder == True:
         if hps.data.n_speakers == 0:
             print("Warning: use_spk_conditioned_encoder is True but n_speakers is 0")
-        print("Setting use_spk_conditioned_encoder to False as model is a single speaker model")
-        use_spk_conditioned_encoder = False
+        print("Using speaker-conditioned encoder for VITS2")
+        use_spk_conditioned_encoder = True
     else:
-        print("Using normal encoder for VITS1 (cuz it's single speaker after all)")
+        print("Using normal encoder for VITS1 (no speaker conditioning)")
         use_spk_conditioned_encoder = False
 
     if "use_noise_scaled_mas" in hps.model.keys() and hps.model.use_noise_scaled_mas == True:

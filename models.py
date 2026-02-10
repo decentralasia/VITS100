@@ -1390,7 +1390,7 @@ class ReferenceEncoder(nn.Module):
                 nn.Conv1d(in_ch, out_ch, kernel_size=kernel,
                           stride=stride, padding=kernel // 2, bias=True)
             )
-            self.norms.append(nn.InstanceNorm1d(out_ch, affine=True))
+            self.norms.append(nn.BatchNorm1d(out_ch))
 
         # GRU: processes temporal sequence after convolutions
         self.gru = nn.GRU(
