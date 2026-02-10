@@ -489,6 +489,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 #     scalars=scalar_dict)
 
             if global_step != 0 and global_step % hps.train.eval_interval == 0:
+                print("Doing evaluation")
                 global best_checkpoints
                 val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
                 
