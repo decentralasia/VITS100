@@ -431,138 +431,113 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
             scaler.update()
 
-        if rank == 0:
-            if global_step != 0 and global_step % hps.train.log_interval == 0:
-                lr = optim_g.param_groups[0]['lr']
-
-                losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
-
-                logger.info('Train Epoch: {} [{:.0f}%]'.format(
-                    epoch,
-                    100. * batch_idx / len(train_loader)))
-                logger.info([x.item() for x in losses] + [global_step, lr])
-
-                scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr,
-                               "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
-
-                if net_dur_disc is not None:  # 2인 경우
-                    scalar_dict.update(
-                        {"loss/dur_disc/total": loss_dur_disc_all, "grad_norm_dur_disc": grad_norm_dur_disc})
-                scalar_dict.update(
-                    {"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl,
-                     "loss/g/subband": loss_subband})
-
-                scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
-                scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
-                scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
-
-                # Log to wandb
-                def get_scalar(value):
-                    """Convert tensor or scalar to Python float"""
-                    return value.item() if torch.is_tensor(value) else float(value)
-
-                wandb_dict = {
-                    "train/loss_gen_total": get_scalar(loss_gen_all),
-                    "train/loss_disc_total": get_scalar(loss_disc_all),
-                    "train/loss_gen": get_scalar(loss_gen),
-                    "train/loss_disc": get_scalar(loss_disc),
-                    "train/loss_fm": get_scalar(loss_fm),
-                    "train/loss_mel": get_scalar(loss_mel),
-                    "train/loss_dur": get_scalar(loss_dur),
-                    "train/loss_kl": get_scalar(loss_kl),
-                    "train/loss_subband": get_scalar(loss_subband),
-                    "train/learning_rate": lr,
-                    "train/grad_norm_d": grad_norm_d,
-                    "train/grad_norm_g": grad_norm_g,
-                    "train/epoch": epoch,
-                }
-
-                if net_dur_disc is not None:
-                    wandb_dict.update({
-                        "train/loss_dur_disc_total": get_scalar(loss_dur_disc_all),
-                        "train/loss_dur_gen": get_scalar(loss_dur_gen),
-                        "train/grad_norm_dur_disc": grad_norm_dur_disc,
-                    })
-
-                # Log individual generator and discriminator losses
-                for i, v in enumerate(losses_gen):
-                    wandb_dict[f"train/loss_gen_{i}"] = get_scalar(v)
-                for i, v in enumerate(losses_disc_r):
-                    wandb_dict[f"train/loss_disc_r_{i}"] = get_scalar(v)
-                for i, v in enumerate(losses_disc_g):
-                    wandb_dict[f"train/loss_disc_g_{i}"] = get_scalar(v)
-
-                if net_dur_disc is not None:
-                    for i, v in enumerate(losses_dur_disc_r):
-                        wandb_dict[f"train/loss_dur_disc_r_{i}"] = get_scalar(v)
-                    for i, v in enumerate(losses_dur_disc_g):
-                        wandb_dict[f"train/loss_dur_disc_g_{i}"] = get_scalar(v)
-
-                wandb.log(wandb_dict, step=global_step)
-
-                # if net_dur_disc is not None: # - 보류?
-                #   scalar_dict.update({"loss/dur_disc_r" : f"{losses_dur_disc_r}"})
-                #   scalar_dict.update({"loss/dur_disc_g" : f"{losses_dur_disc_g}"})
-                #   scalar_dict.update({"loss/dur_gen" : f"{loss_dur_gen}"})
-
-                # image_dict = {
-                #     "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
-                #     "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
-                #     "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
-                #     "all/attn": utils.plot_alignment_to_numpy(attn[0, 0].data.cpu().numpy())
-                # }
-                # utils.summarize(
-                #     writer=writer,
-                #     global_step=global_step,
-                #     images=image_dict,
-                #     scalars=scalar_dict)
-
-            if global_step != 0 and global_step % hps.train.eval_interval == 0:
-                print("Doing evaluation  ", global_step)
-                global best_checkpoints
-                val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
-                
-                # Determine if this checkpoint should be saved (top 3 by smallest val_loss)
-                should_save = False
-                step_to_remove = None
-                
-                if len(best_checkpoints) < 3:
-                    # Less than 3 checkpoints, always save
-                    should_save = True
-                    heapq.heappush(best_checkpoints, (-val_loss, global_step))
-                else:
-                    # Check if current val_loss is better than the worst in top 3
-                    worst_loss, worst_step = best_checkpoints[0]  # max-heap: worst = highest (most negative)
-                    worst_loss = -worst_loss  # convert back to positive
-                    
-                    if val_loss < worst_loss:
-                        should_save = True
-                        # Remove the worst checkpoint
-                        heapq.heappop(best_checkpoints)
-                        step_to_remove = worst_step
-                        heapq.heappush(best_checkpoints, (-val_loss, global_step))
-                
-                if should_save:
-                    logger.info(f"Saving checkpoint at step {global_step} with val_loss={val_loss:.6f}")
-                    utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
-                                          os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
-                    utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
-                                          os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
-                    if net_dur_disc is not None:
-                        utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
-                                              os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
-                    
-                    # Remove old checkpoint if needed
-                    if step_to_remove is not None:
-                        logger.info(f"Removing checkpoint at step {step_to_remove} (worse val_loss)")
-                        for prefix in ["G_", "D_", "DUR_"]:
-                            old_ckpt = os.path.join(hps.model_dir, f"{prefix}{step_to_remove}.pth")
-                            if os.path.exists(old_ckpt):
-                                os.remove(old_ckpt)
-                else:
-                    logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
-
         if is_step:
+            if rank == 0:
+                if global_step != 0 and global_step % hps.train.log_interval == 0:
+                    lr = optim_g.param_groups[0]['lr']
+
+                    losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
+
+                    logger.info('Train Epoch: {} [{:.0f}%]'.format(
+                        epoch,
+                        100. * batch_idx / len(train_loader)))
+                    logger.info([x.item() for x in losses] + [global_step, lr])
+
+                    scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr,
+                                   "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
+
+                    if net_dur_disc is not None:
+                        scalar_dict.update(
+                            {"loss/dur_disc/total": loss_dur_disc_all, "grad_norm_dur_disc": grad_norm_dur_disc})
+                    scalar_dict.update(
+                        {"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl,
+                         "loss/g/subband": loss_subband})
+
+                    scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
+                    scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
+                    scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
+
+                    # Log to wandb
+                    def get_scalar(value):
+                        """Convert tensor or scalar to Python float"""
+                        return value.item() if torch.is_tensor(value) else float(value)
+
+                    wandb_dict = {
+                        "train/loss_gen_total": get_scalar(loss_gen_all),
+                        "train/loss_disc_total": get_scalar(loss_disc_all),
+                        "train/loss_gen": get_scalar(loss_gen),
+                        "train/loss_disc": get_scalar(loss_disc),
+                        "train/loss_fm": get_scalar(loss_fm),
+                        "train/loss_mel": get_scalar(loss_mel),
+                        "train/loss_dur": get_scalar(loss_dur),
+                        "train/loss_kl": get_scalar(loss_kl),
+                        "train/loss_subband": get_scalar(loss_subband),
+                        "train/learning_rate": lr,
+                        "train/grad_norm_d": grad_norm_d,
+                        "train/grad_norm_g": grad_norm_g,
+                        "train/epoch": epoch,
+                    }
+
+                    if net_dur_disc is not None:
+                        wandb_dict.update({
+                            "train/loss_dur_disc_total": get_scalar(loss_dur_disc_all),
+                            "train/loss_dur_gen": get_scalar(loss_dur_gen),
+                            "train/grad_norm_dur_disc": grad_norm_dur_disc,
+                        })
+
+                    for i, v in enumerate(losses_gen):
+                        wandb_dict[f"train/loss_gen_{i}"] = get_scalar(v)
+                    for i, v in enumerate(losses_disc_r):
+                        wandb_dict[f"train/loss_disc_r_{i}"] = get_scalar(v)
+                    for i, v in enumerate(losses_disc_g):
+                        wandb_dict[f"train/loss_disc_g_{i}"] = get_scalar(v)
+
+                    if net_dur_disc is not None:
+                        for i, v in enumerate(losses_dur_disc_r):
+                            wandb_dict[f"train/loss_dur_disc_r_{i}"] = get_scalar(v)
+                        for i, v in enumerate(losses_dur_disc_g):
+                            wandb_dict[f"train/loss_dur_disc_g_{i}"] = get_scalar(v)
+
+                    wandb.log(wandb_dict, step=global_step)
+
+                if global_step != 0 and global_step % hps.train.eval_interval == 0:
+                    print("Doing evaluation  ", global_step)
+                    global best_checkpoints
+                    val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
+
+                    # Determine if this checkpoint should be saved (top 3 by smallest val_loss)
+                    should_save = False
+                    step_to_remove = None
+
+                    if len(best_checkpoints) < 3:
+                        should_save = True
+                        heapq.heappush(best_checkpoints, (-val_loss, global_step))
+                    else:
+                        worst_loss, worst_step = best_checkpoints[0]
+                        worst_loss = -worst_loss
+                        if val_loss < worst_loss:
+                            should_save = True
+                            heapq.heappop(best_checkpoints)
+                            step_to_remove = worst_step
+                            heapq.heappush(best_checkpoints, (-val_loss, global_step))
+
+                    if should_save:
+                        logger.info(f"Saving checkpoint at step {global_step} with val_loss={val_loss:.6f}")
+                        utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
+                                              os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
+                        utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
+                                              os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
+                        if net_dur_disc is not None:
+                            utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
+                                                  os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
+                        if step_to_remove is not None:
+                            logger.info(f"Removing checkpoint at step {step_to_remove} (worse val_loss)")
+                            for prefix in ["G_", "D_", "DUR_"]:
+                                old_ckpt = os.path.join(hps.model_dir, f"{prefix}{step_to_remove}.pth")
+                                if os.path.exists(old_ckpt):
+                                    os.remove(old_ckpt)
+                    else:
+                        logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
             scheduler_g.step()
             scheduler_d.step()
             if scheduler_dur_disc is not None:
