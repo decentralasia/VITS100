@@ -270,7 +270,8 @@ def run(rank, n_gpus, hps):
                 param_group.setdefault('initial_lr', param_group['lr'])
 
     warmup_steps = getattr(hps.train, "warmup_steps", 0)
-    steps_per_epoch = len(train_loader)
+    accum_steps = getattr(hps.train, "grad_accum_steps", 1)
+    steps_per_epoch = len(train_loader) // accum_steps
     lr_lambda_fn = get_lr_lambda(warmup_steps, hps.train.lr_decay, steps_per_epoch)
     last_step = max(global_step - 1, -1)
 
@@ -561,12 +562,13 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 else:
                     logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
 
-        scheduler_g.step()
-        scheduler_d.step()
-        if scheduler_dur_disc is not None:
-            scheduler_dur_disc.step()
+        if is_step:
+            scheduler_g.step()
+            scheduler_d.step()
+            if scheduler_dur_disc is not None:
+                scheduler_dur_disc.step()
 
-        global_step += 1
+            global_step += 1
 
     if rank == 0:
         logger.info('====> Epoch: {}'.format(epoch))
