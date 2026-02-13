@@ -1,7 +1,7 @@
 {
     "train": {
-      "log_interval": 2000,
-      "eval_interval": 2000,
+      "log_interval": 500,
+      "eval_interval": 500,
       "seed": 1234,
       "epochs": 20000,
       "learning_rate": 1e-4,
@@ -17,7 +17,7 @@
       "max_grad_norm_d": 150.0,
       "max_grad_norm_dur_disc": 1.0,
       "grad_accum_steps": 4,
-      "warmup_steps": 2000,
+      "warmup_steps": 500,
       "reset_lr": true,
       "fft_sizes": [384, 683, 171],
       "hop_sizes": [30, 60, 10],
