@@ -538,59 +538,6 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if rank == 0:
         logger.info('====> Epoch: {}'.format(epoch))
 
-import torchaudio
-
-def file_to_mel(file_path,
-                target_sr=22050,
-                n_mels=80,
-                n_fft=1024,
-                hop_length=256,
-                win_length=1024,
-                fmin=0.0,
-                fmax=8000.0,
-                normalize_audio=True):
-    """
-    Loads an audio file and converts it to a Mel Spectrogram.
-    """
-    # 1. Load the audio
-    # waveform shape: [channels, time]
-    waveform, sr = torchaudio.load(file_path)
-
-    # 2. Resample if necessary
-    if sr != target_sr:
-        resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sr)
-        waveform = resampler(waveform)
-
-    # 3. Normalize Audio (Matches: audio_norm = audio / self.max_wav_value)
-    # Most wav files load as -1 to 1 float, but if you need specific scaling:
-    if normalize_audio:
-        # This ensures the audio is within [-1, 1]
-        waveform = torch.clamp(waveform, min=-1.0, max=1.0)
-
-    # 4. Define the Mel Spectrogram Transform
-    # center=False matches the snippet provided
-    mel_transform = torchaudio.transforms.MelSpectrogram(
-        sample_rate=target_sr,
-        n_fft=n_fft,
-        win_length=win_length,
-        hop_length=hop_length,
-        f_min=fmin,
-        f_max=fmax,
-        n_mels=n_mels,
-        center=False,
-        power=1.0 # 1.0 for magnitude, 2.0 for power. Tacotron usually uses 1.0
-    )
-
-    # 5. Generate Mel Spec
-    mel_spec = mel_transform(waveform)
-
-    # 6. Logarithmic Compression (Dynamic Range Compression)
-    # The snippet's `mel_spectrogram_torch` usually implies a log operation.
-    # We clamp to avoid log(0).
-    mel_spec = torch.log(torch.clamp(mel_spec, min=1e-5))
-
-    return mel_spec
-
 def evaluate(hps, generator, eval_loader, writer_eval):
     generator.eval()
 
@@ -675,17 +622,21 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     spec_file_aiganysh_ky = "DUMMY1/00000_000_inter_news_05-1_024_1_Aiganysh_strict_kg.wav"
     spec_file_aiganysh_ru = "DUMMY1/00010_010_russian_017_1_Aiganysh_neutral_ru.wav"
 
-    spec_ref_timur_ky = file_to_mel(spec_file_timur_ky).to(device)
-    spec_ref_timur_ru = file_to_mel(spec_file_timur_ru).to(device)
-    spec_ref_aiganysh_ky = file_to_mel(spec_file_aiganysh_ky).to(device)
-    spec_ref_aiganysh_ru = file_to_mel(spec_file_aiganysh_ru).to(device)
+    spec_ref_timur_ky, _ = eval_loader.dataset.get_audio(spec_file_timur_ky)
+    spec_ref_timur_ky = spec_ref_timur_ky.unsqueeze(0).to(device)
+    spec_ref_timur_ru, _ = eval_loader.dataset.get_audio(spec_file_timur_ru)
+    spec_ref_timur_ru = spec_ref_timur_ru.unsqueeze(0).to(device)
+    spec_ref_aiganysh_ky, _ = eval_loader.dataset.get_audio(spec_file_aiganysh_ky)
+    spec_ref_aiganysh_ky = spec_ref_aiganysh_ky.unsqueeze(0).to(device)
+    spec_ref_aiganysh_ru, _ = eval_loader.dataset.get_audio(spec_file_aiganysh_ru)
+    spec_ref_aiganysh_ru = spec_ref_aiganysh_ru.unsqueeze(0).to(device)
 
 
     with torch.no_grad():
-        audio_timur_ky = generator.module.infer(ky_text, y=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = generator.module.infer(ru_text, y=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = generator.module.infer(ky_text, y=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ru = generator.module.infer(ru_text, y=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ky = generator.module.infer(ky_text, spec=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.module.infer(ru_text, spec=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.module.infer(ky_text, spec=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ru = generator.module.infer(ru_text, spec=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
 
 
     # Log validation metrics to wandb

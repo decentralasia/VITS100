@@ -1404,12 +1404,14 @@ class ReferenceEncoder(nn.Module):
         # Final projection to embedding dimension
         self.lin_layer = nn.Linear(gru_hidden, out_channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, spec_lengths: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        TensorRT-optimized forward pass (no dynamic control flow).
+        TensorRT-optimized forward pass (no pack_padded_sequence, no dynamic control flow).
 
         Args:
             x: mel-spectrogram [batch, n_mels, time]
+            spec_lengths: optional [batch] — actual lengths before padding.
+                          When provided, pads are masked out of the GRU.
 
         Returns:
             embedding: style embedding [batch, out_channels]
@@ -1422,14 +1424,32 @@ class ReferenceEncoder(nn.Module):
         x = self.norms[4](F.leaky_relu(self.convs[4](x), 0.3))
         x = self.norms[5](F.leaky_relu(self.convs[5](x), 0.3))
 
-        # [batch, 256, time] → [batch, time, 256]
+        # [batch, 256, time'] → [batch, time', 256]
         x = x.transpose(1, 2)
 
-        # GRU: take final hidden state
-        _, hidden = self.gru(x)
+        if spec_lengths is not None:
+            # Two stride-2 convolutions (conv2, conv4) downsample time by ~4x
+            lengths = (spec_lengths - 1) // 4 + 1
+            time_steps = x.size(1)
+            arange = torch.arange(time_steps, device=x.device)
 
-        # [1, batch, 128] → [batch, 384]
-        return self.lin_layer(hidden.squeeze(0))
+            # Zero out padded positions before GRU
+            mask = (arange.unsqueeze(0) < lengths.unsqueeze(1)).unsqueeze(-1).to(x.dtype)
+            x = x * mask
+
+            # GRU forward (no pack_padded_sequence for TensorRT compatibility)
+            gru_out, _ = self.gru(x)
+
+            # Extract hidden at last valid timestep via one-hot dot product
+            last_pos = (arange.unsqueeze(0) == (lengths - 1).unsqueeze(1)).unsqueeze(-1).to(gru_out.dtype)
+            hidden = (gru_out * last_pos).sum(dim=1)  # [batch, gru_hidden]
+        else:
+            # No lengths — take final GRU hidden state (inference / single sample)
+            _, hidden = self.gru(x)
+            hidden = hidden.squeeze(0)
+
+        # [batch, gru_hidden] → [batch, out_channels]
+        return self.lin_layer(hidden)
 
 class SynthesizerTrn(nn.Module):
     """
@@ -1650,7 +1670,7 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, spec, spec_lengths, emphasis, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        reference_emb = self.ref_enc(spec).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)
