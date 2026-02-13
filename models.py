@@ -1731,9 +1731,9 @@ class SynthesizerTrn(nn.Module):
         o, o_mb = self.dec(z_slice, g=g)
         return o, o_mb, l_length, attn, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (x, logw, logw_)
 
-    def infer(self, x, spec, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None):
+    def infer(self, x, spec, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None, spec_lengths=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
-        reference_emb = self.ref_enc(spec).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths).unsqueeze(-1)
 
         # Use _build_g to combine speaker, tone, language, and reference embeddings
         g = self._build_g_5(reference_emb=reference_emb)

@@ -40,7 +40,7 @@ from losses import (
     kl_loss,
     subband_stft_loss
 )
-from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from mel_processing import mel_spectrogram_torch
 from text.symbols import symbols
 
 torch.autograd.set_detect_anomaly(True)
@@ -109,14 +109,8 @@ def run(rank, n_gpus, hps):
     torch.manual_seed(hps.train.seed)
     torch.cuda.set_device(rank)
 
-    if "use_mel_posterior_encoder" in hps.model.keys() and hps.model.use_mel_posterior_encoder == True:  # P.incoder for vits2
-        print("Using mel posterior encoder for VITS2")
-        posterior_channels = 80  # vits2
-        hps.data.use_mel_posterior_encoder = True
-    else:
-        print("Using lin posterior encoder for VITS1")
-        posterior_channels = hps.data.filter_length // 2 + 1
-        hps.data.use_mel_posterior_encoder = False
+    posterior_channels = 80
+    hps.data.use_mel_posterior_encoder = True
 
     train_dataset = TextAudioSpeakerToneLangLoader(hps.data.training_files, hps.data)
     train_sampler = DistributedBucketSampler(
@@ -124,7 +118,7 @@ def run(rank, n_gpus, hps):
         hps.train.batch_size,
         #[371, 489, 605, 714, 831, 954, 1092, 1251, 1452, 1706, 3885],
         #[654, 814, 994, 1168, 1346, 1547, 1735, 1907, 2273],
-        [414, 546, 687, 828, 974, 1141, 1355, 1636, 4077],
+        [414, 546, 687, 828, 974, 1141, 1355, 1636, 4777],
         #[1000, 2000],
         num_replicas=n_gpus,
         rank=rank,
@@ -345,17 +339,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (
                 hidden_x, logw, logw_) = net_g(x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid)
 
-            if hps.model.use_mel_posterior_encoder or hps.data.use_mel_posterior_encoder:
-                mel = spec
-            else:
-                mel = spec_to_mel_torch(
-                    #spec,
-                    spec.float(),  # - for 16bit stability
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax)
+            mel = spec
             y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
                 y_hat.squeeze(1),
@@ -597,17 +581,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
             )
 
-            # Compute mel spectrogram
-            if hps.model.use_mel_posterior_encoder or hps.data.use_mel_posterior_encoder:
-                mel = spec
-            else:
-                mel = spec_to_mel_torch(
-                    spec.float(),
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax)
+            mel = spec
 
             y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
