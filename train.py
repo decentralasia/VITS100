@@ -261,11 +261,13 @@ def run(rank, n_gpus, hps):
 
     # reset_lr=true: ignore checkpoint's LR, use config's learning_rate as base
     # reset_lr=false: continue with the LR schedule from the checkpoint
-    if getattr(hps.train, "reset_lr", False):
-        for optim in [optim_g, optim_d] + ([optim_dur_disc] if optim_dur_disc is not None else []):
-            for param_group in optim.param_groups:
-                param_group.pop('initial_lr', None)
+    for optim in [optim_g, optim_d] + ([optim_dur_disc] if optim_dur_disc is not None else []):
+        for param_group in optim.param_groups:
+            if getattr(hps.train, "reset_lr", False):
+                param_group['initial_lr'] = hps.train.learning_rate
                 param_group['lr'] = hps.train.learning_rate
+            else:
+                param_group.setdefault('initial_lr', param_group['lr'])
 
     warmup_steps = getattr(hps.train, "warmup_steps", 0)
     steps_per_epoch = len(train_loader)
