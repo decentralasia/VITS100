@@ -259,6 +259,14 @@ def run(rank, n_gpus, hps):
         if rank == 0:
             logger.info("Starting training from scratch")
 
+    # reset_lr=true: ignore checkpoint's LR, use config's learning_rate as base
+    # reset_lr=false: continue with the LR schedule from the checkpoint
+    if getattr(hps.train, "reset_lr", False):
+        for optim in [optim_g, optim_d] + ([optim_dur_disc] if optim_dur_disc is not None else []):
+            for param_group in optim.param_groups:
+                param_group.pop('initial_lr', None)
+                param_group['lr'] = hps.train.learning_rate
+
     warmup_steps = getattr(hps.train, "warmup_steps", 0)
     steps_per_epoch = len(train_loader)
     lr_lambda_fn = get_lr_lambda(warmup_steps, hps.train.lr_decay, steps_per_epoch)
@@ -300,7 +308,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
     train_loader.batch_sampler.set_epoch(epoch)
     global global_step
-    max_grad_norm = getattr(hps.train, "max_grad_norm", 1.0)
+    max_grad_norm_g = getattr(hps.train, "max_grad_norm_g", 2000.0)
+    max_grad_norm_d = getattr(hps.train, "max_grad_norm_d", 150.0)
+    max_grad_norm_dur_disc = getattr(hps.train, "max_grad_norm_dur_disc", 1.0)
     accum_steps = getattr(hps.train, "grad_accum_steps", 1)
 
     net_g.train()
@@ -401,18 +411,18 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
         if is_step:
             scaler.unscale_(optim_d)
-            grad_norm_d = torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_grad_norm)
+            grad_norm_d = torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_grad_norm_d)
             scaler.step(optim_d)
             optim_d.zero_grad()
 
             if net_dur_disc is not None:
                 scaler.unscale_(optim_dur_disc)
-                grad_norm_dur_disc = torch.nn.utils.clip_grad_norm_(net_dur_disc.parameters(), max_grad_norm)
+                grad_norm_dur_disc = torch.nn.utils.clip_grad_norm_(net_dur_disc.parameters(), max_grad_norm_dur_disc)
                 scaler.step(optim_dur_disc)
                 optim_dur_disc.zero_grad()
 
             scaler.unscale_(optim_g)
-            grad_norm_g = torch.nn.utils.clip_grad_norm_(net_g.parameters(), max_grad_norm)
+            grad_norm_g = torch.nn.utils.clip_grad_norm_(net_g.parameters(), max_grad_norm_g)
             scaler.step(optim_g)
             optim_g.zero_grad()
 
