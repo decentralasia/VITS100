@@ -61,6 +61,17 @@ def main():
     mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
 
 
+def get_lr_lambda(warmup_steps, lr_decay, steps_per_epoch):
+    """LR schedule: linear warmup then exponential decay (per-step)."""
+    def lr_lambda(step):
+        if warmup_steps > 0 and step < warmup_steps:
+            return max(step, 1) / warmup_steps
+        effective_step = step - warmup_steps
+        epoch = effective_step / max(steps_per_epoch, 1)
+        return lr_decay ** epoch
+    return lr_lambda
+
+
 def run(rank, n_gpus, hps):
     net_dur_disc = None
     global global_step
@@ -254,11 +265,16 @@ def run(rank, n_gpus, hps):
         if rank == 0:
             logger.info("Starting training from scratch")
 
-    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
-    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
+    warmup_steps = getattr(hps.train, "warmup_steps", 0)
+    steps_per_epoch = len(train_loader)
+    lr_lambda_fn = get_lr_lambda(warmup_steps, hps.train.lr_decay, steps_per_epoch)
+    last_step = max(global_step - 1, -1)
+
+    scheduler_g = torch.optim.lr_scheduler.LambdaLR(optim_g, lr_lambda=lr_lambda_fn, last_epoch=last_step)
+    scheduler_d = torch.optim.lr_scheduler.LambdaLR(optim_d, lr_lambda=lr_lambda_fn, last_epoch=last_step)
     if net_dur_disc is not None:  # 2의 경우
-        scheduler_dur_disc = torch.optim.lr_scheduler.ExponentialLR(optim_dur_disc, gamma=hps.train.lr_decay,
-                                                                    last_epoch=epoch_str - 2)
+        scheduler_dur_disc = torch.optim.lr_scheduler.LambdaLR(optim_dur_disc, lr_lambda=lr_lambda_fn,
+                                                                last_epoch=last_step)
     else:
         scheduler_dur_disc = None
 
@@ -272,11 +288,6 @@ def run(rank, n_gpus, hps):
         else:
             train_and_evaluate(rank, epoch, hps, [net_g, net_d, net_dur_disc], [optim_g, optim_d, optim_dur_disc],
                                [scheduler_g, scheduler_d, scheduler_dur_disc], scaler, [train_loader, None], None, None)
-        scheduler_g.step()
-        scheduler_d.step()
-        if net_dur_disc is not None:
-            scheduler_dur_disc.step()
-
     # Finish wandb run
     if rank == 0:
         wandb.finish()
@@ -295,11 +306,24 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
     train_loader.batch_sampler.set_epoch(epoch)
     global global_step
+    max_grad_norm = getattr(hps.train, "max_grad_norm", 1.0)
+    accum_steps = getattr(hps.train, "grad_accum_steps", 1)
 
     net_g.train()
     net_d.train()
     if net_dur_disc is not None:  # vits2
         net_dur_disc.train()
+
+    # Initialize gradient norms for logging
+    grad_norm_d = 0.0
+    grad_norm_g = 0.0
+    grad_norm_dur_disc = 0.0
+
+    # Zero gradients before the loop (for gradient accumulation)
+    optim_g.zero_grad()
+    optim_d.zero_grad()
+    if optim_dur_disc is not None:
+        optim_dur_disc.zero_grad()
 
     if rank == 0:
         loader = tqdm.tqdm(train_loader, desc='Loading training data')
@@ -314,6 +338,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
         y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
         sid, tid, lid = sid.cuda(non_blocking=True), tid.cuda(non_blocking=True), lid.cuda(non_blocking=True)
+
+        is_step = (batch_idx + 1) % accum_steps == 0
 
         with autocast("cuda", enabled=hps.train.fp16_run):
             y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (
@@ -358,17 +384,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                     # TODO: I think need to mean using the mask, but for now, just mean all
                     loss_dur_disc, losses_dur_disc_r, losses_dur_disc_g = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
                     loss_dur_disc_all = loss_dur_disc
-                optim_dur_disc.zero_grad()
-                scaler.scale(loss_dur_disc_all).backward()
-                scaler.unscale_(optim_dur_disc)
-                grad_norm_dur_disc = commons.clip_grad_value_(net_dur_disc.parameters(), None)
-                scaler.step(optim_dur_disc)
+                scaler.scale(loss_dur_disc_all / accum_steps).backward()
 
-        optim_d.zero_grad()
-        scaler.scale(loss_disc_all).backward()
-        scaler.unscale_(optim_d)
-        grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
-        scaler.step(optim_d)
+        scaler.scale(loss_disc_all / accum_steps).backward()
 
         with autocast("cuda", enabled=hps.train.fp16_run):
             # Generator
@@ -395,12 +413,26 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                     loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
                     loss_gen_all += loss_dur_gen
 
-        optim_g.zero_grad()
-        scaler.scale(loss_gen_all).backward()
-        scaler.unscale_(optim_g)
-        grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
-        scaler.step(optim_g)
-        scaler.update()
+        scaler.scale(loss_gen_all / accum_steps).backward()
+
+        if is_step:
+            scaler.unscale_(optim_d)
+            grad_norm_d = torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_grad_norm)
+            scaler.step(optim_d)
+            optim_d.zero_grad()
+
+            if net_dur_disc is not None:
+                scaler.unscale_(optim_dur_disc)
+                grad_norm_dur_disc = torch.nn.utils.clip_grad_norm_(net_dur_disc.parameters(), max_grad_norm)
+                scaler.step(optim_dur_disc)
+                optim_dur_disc.zero_grad()
+
+            scaler.unscale_(optim_g)
+            grad_norm_g = torch.nn.utils.clip_grad_norm_(net_g.parameters(), max_grad_norm)
+            scaler.step(optim_g)
+            optim_g.zero_grad()
+
+            scaler.update()
 
         if rank == 0:
             if global_step != 0 and global_step % hps.train.log_interval == 0:
@@ -533,6 +565,11 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 else:
                     logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
 
+        scheduler_g.step()
+        scheduler_d.step()
+        if scheduler_dur_disc is not None:
+            scheduler_dur_disc.step()
+
         global_step += 1
 
     if rank == 0:
@@ -601,8 +638,8 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     avg_kl_loss = total_kl_loss / num_batches
     avg_dur_loss = total_dur_loss / num_batches
 
-    ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык'
-    ru_text = 'бишкек столица кыргызстана'
+    ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык.'
+    ru_text = 'бишкек столица кыргызстана.'
     device = generator.device
     ky_text, is_highlighted_ky = eval_loader.dataset.get_text(ky_text, lid="ky")
     ky_text = ky_text.to(device).unsqueeze(0)
