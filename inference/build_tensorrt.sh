@@ -15,9 +15,9 @@ docker run --rm \
         cd /workspace && \
         trtexec --onnx=model.onnx \
             --saveEngine=model.plan \
-            --minShapes=input:1x1,spec_ref:1x80x128,sid:1,tid:1,lid:1 \
-            --optShapes=input:1x32,spec_ref:1x80x200,sid:1,tid:1,lid:1 \
-            --maxShapes=input:1x256,spec_ref:1x80x1000,sid:1,tid:1,lid:1 \
+            --minShapes=input:1x1,emphasis:1x1,sid:1,tid:1 \
+            --optShapes=input:1x250,emphasis:1x250,sid:1,tid:1 \
+            --maxShapes=input:1x500,emphasis:1x500,sid:1,tid:1 \
             --fp16 \
             --verbose
     "
