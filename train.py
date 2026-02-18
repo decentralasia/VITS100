@@ -602,7 +602,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     avg_dur_loss = total_dur_loss / num_batches
 
     ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык.'
-    ru_text = 'бишкек столица кыргызстана.'
+    ru_text = 'бишкек столица кыргызстана. а в эмбанке есть бишкек.'
     device = generator.device
     ky_text, is_highlighted_ky = eval_loader.dataset.get_text(ky_text, lid="ky")
     ky_text = ky_text.to(device).unsqueeze(0)
@@ -632,11 +632,34 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     spec_ref_aiganysh_ru = spec_ref_aiganysh_ru.unsqueeze(0).to(device)
 
 
+    # New speakers (Russian only)
+    new_speakers = [
+        ("alexander_vlasov", 2),
+        ("artem_lebedev", 3),
+        ("kari", 4),
+        ("larisa_actrisa", 5),
+        ("nikolay", 6),
+        ("rina", 7),
+        ("victoria", 8),
+    ]
+
+    new_speaker_specs = {}
+    for name, _ in new_speakers:
+        ref_path = f"DUMMY1/output/{name}/000000.wav"
+        spec_ref, _ = eval_loader.dataset.get_audio(ref_path)
+        new_speaker_specs[name] = spec_ref.unsqueeze(0).to(device)
+
     with torch.no_grad():
         audio_timur_ky = generator.module.infer(ky_text, spec=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
         audio_timur_ru = generator.module.infer(ru_text, spec=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
         audio_aiganysh_ky = generator.module.infer(ky_text, spec=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
         audio_aiganysh_ru = generator.module.infer(ru_text, spec=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+
+        new_speaker_audios = {}
+        for name, sid_val in new_speakers:
+            sid_new = torch.LongTensor([sid_val]).to(device)
+            audio = generator.module.infer(ru_text, spec=new_speaker_specs[name], emphasis=is_highlighted_ru, sid=sid_new, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+            new_speaker_audios[name] = audio
 
 
     # Log validation metrics to wandb
@@ -667,6 +690,13 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         sample_rate=hps.data.sampling_rate,
         caption="Aiganysh Ru"
     )
+
+    for name, audio in new_speaker_audios.items():
+        wandb_eval_dict[f"val/{name}_ru"] = wandb.Audio(
+            audio,
+            sample_rate=hps.data.sampling_rate,
+            caption=f"{name} Ru"
+        )
 
 
     wandb.log(wandb_eval_dict, step=global_step)
