@@ -23,24 +23,38 @@ from text.symbols import symbols
 
 
 #- Variable section
-PATH_TO_CONFIG = "/mnt/d/mbank/config.json"
-PATH_TO_MODEL = "/mnt/d/mbank/G_192000.pth"
+PATH_TO_CONFIG = "../logs/mbank/config.json"
+PATH_TO_MODEL = "../logs/mbank/G_194000.pth"
 OUTPUT_ONNX = "model.onnx"
 OPSET_VERSION = 17
 posterior_channels = 80
 
-# Reference mel specs — ordered by [sid * N_TONES + tid]
-# sid=0 (Timur):    tid=0 neutral, tid=1 strict, tid=2 friendly
-# sid=1 (Aiganysh): tid=0 neutral, tid=1 strict, tid=2 friendly
+# Reference mel specs — ordered by [lid * N_SPEAKERS * N_TONES + sid * N_TONES + tid]
+#
+# lid=0 (ky):
+#   sid=0 (Timur):    tid=0 neutral, tid=1 strict, tid=2 friendly
+#   sid=1 (Aiganysh): tid=0 neutral, tid=1 strict, tid=2 friendly
+# lid=1 (ru):
+#   sid=0 (Timur):    tid=0 neutral, tid=1 strict, tid=2 friendly
+#   sid=1 (Aiganysh): tid=0 neutral, tid=1 strict, tid=2 friendly
+N_SPEAKERS = 2
 N_TONES = 3
 SPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_SPEC_FILES = [
-    "00001_001_news_01-05_001_1_Timur_neutral_kg.mel.pt",              # sid=0, tid=0
-    "00002_002_inter_sounds_neutral_048_1_Timur_strict_kg.mel.pt",     # sid=0, tid=1
-    "00005_005_inter_sounds_neutral_048_1_Timur_friendly_kg.mel.pt",   # sid=0, tid=2
-    "00002_002_news_01-05_018_1_Aiganysh_neutral_kg.mel.pt",           # sid=1, tid=0
-    "00000_000_inter_sounds_neutral_035_1_Aiganysh_strict_kg.mel.pt",  # sid=1, tid=1
-    "00044_003_sales_mislamic_names_addresses_001_5_Aiganysh_friendly_kg.mel.pt",  # sid=1, tid=2
+    # lid=0 (ky)
+    "00001_001_news_01-05_001_1_Timur_neutral_kg.mel.pt",              # lid=0, sid=0, tid=0
+    "00002_002_inter_sounds_neutral_048_1_Timur_strict_kg.mel.pt",     # lid=0, sid=0, tid=1
+    "00005_005_inter_sounds_neutral_048_1_Timur_friendly_kg.mel.pt",   # lid=0, sid=0, tid=2
+    "00002_002_news_01-05_018_1_Aiganysh_neutral_kg.mel.pt",           # lid=0, sid=1, tid=0
+    "00000_000_inter_sounds_neutral_035_1_Aiganysh_strict_kg.mel.pt",  # lid=0, sid=1, tid=1
+    "00044_003_sales_mislamic_names_addresses_001_5_Aiganysh_friendly_kg.mel.pt",  # lid=0, sid=1, tid=2
+    # lid=1 (ru) — TODO: fill in Russian reference mel spec files
+    "00000_000_ru_support_022_1_Timur_neutral_ru.mel.pt",              # lid=1, sid=0, tid=0
+    "00000_000_ru_support_022_1_Timur_neutral_ru.mel.pt",               # lid=1, sid=0, tid=1
+    "00000_000_ru_support_022_1_Timur_neutral_ru.mel.pt",             # lid=1, sid=0, tid=2
+    "00000_000_ru_support_040_1_Aiganysh_strict_ru.mel.pt",           # lid=1, sid=1, tid=0
+    "00000_000_ru_support_040_1_Aiganysh_strict_ru.mel.pt",            # lid=1, sid=1, tid=1
+    "00000_000_ru_support_040_1_Aiganysh_strict_ru.mel.pt",          # lid=1, sid=1, tid=2
 ]
 
 hps = utils.get_hparams_from_file(PATH_TO_CONFIG)
@@ -69,11 +83,10 @@ net_g.register_buffer('ref_spec_lengths', spec_lengths)
 def infer_forward(text, emphasis, sid, tid, lid):
     """ONNX-compatible forward wrapper.
 
-    sid and tid select the baked-in reference spectrogram:
-        idx = sid * N_TONES + tid
-    lid is kept as input for future extensibility.
+    lid, sid and tid select the baked-in reference spectrogram:
+        idx = lid * N_SPEAKERS * N_TONES + sid * N_TONES + tid
     """
-    idx = sid.long() * N_TONES + tid.long()  # [batch]
+    idx = lid.long() * N_SPEAKERS * N_TONES + sid.long() * N_TONES + tid.long()  # [batch]
     spec = net_g.ref_specs[idx]              # [batch, 80, max_len]
     spec_len = net_g.ref_spec_lengths[idx]   # [batch]
 
