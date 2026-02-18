@@ -69,7 +69,12 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         3) computes spectrograms from audio files.
     """
     def __init__(self, audiopaths_sid_text, hparams):
-        self.audiopaths_sid_tone_lang_text = load_filepaths_and_text(audiopaths_sid_text)
+        if isinstance(audiopaths_sid_text, list):
+            self.audiopaths_sid_tone_lang_text = []
+            for fpath in audiopaths_sid_text:
+                self.audiopaths_sid_tone_lang_text.extend(load_filepaths_and_text(fpath))
+        else:
+            self.audiopaths_sid_tone_lang_text = load_filepaths_and_text(audiopaths_sid_text)
         self.text_cleaners = hparams.text_cleaners
         self.max_wav_value = hparams.max_wav_value
         self.sampling_rate = hparams.sampling_rate

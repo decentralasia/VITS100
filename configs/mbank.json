@@ -1,7 +1,7 @@
 {
     "train": {
-      "log_interval": 500,
-      "eval_interval": 500,
+      "log_interval": 250,
+      "eval_interval": 250,
       "seed": 1234,
       "epochs": 20000,
       "learning_rate": 1e-4,
@@ -26,7 +26,16 @@
     },
     "data": {
       "use_mel_posterior_encoder": true,
-      "training_files":"DUMMY1/train_filtered_manifest.txt",
+      "training_files":[
+        "DUMMY1/train_filtered_manifest.txt",
+        "DUMMY1/manifests/alexander_vlasov.txt",
+        "DUMMY1/manifests/kari.txt",
+        "DUMMY1/manifests/nikolay.txt",
+        "DUMMY1/manifests/victoria.txt",
+        "DUMMY1/manifests/artem_lebedev.txt",
+        "DUMMY1/manifests/larisa_actrisa.txt",
+        "DUMMY1/manifests/rina.txt"
+      ],
       "validation_files":"DUMMY1/val_filtered_manifest.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
