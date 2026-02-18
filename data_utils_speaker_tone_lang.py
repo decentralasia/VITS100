@@ -100,11 +100,19 @@ class TextAudioSpeakerToneLangLoader(torch.utils.data.Dataset):
         self.speaker_dict = {
             "Timur": 0,
             "Aiganysh": 1,
+            "alexander_vlasov": 2,
+            "artem_lebedev": 3,
+            "kari": 4,
+            "larisa_actrisa": 5,
+            "nikolay": 6,
+            "rina": 7,
+            "victoria": 8,
         }
         self.tone_dict = {
             "neutral": 0,
             "strict": 1,
             "friendly": 2,
+            "default": 3,
         }
         self.language_dict = {
             "kg": 0,

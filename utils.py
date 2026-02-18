@@ -5,9 +5,12 @@ import argparse
 import logging
 import json
 import subprocess
+import warnings
 import numpy as np
-from scipy.io.wavfile import read
+from scipy.io.wavfile import read, WavFileWarning
 import torch
+
+warnings.filterwarnings("ignore", category=WavFileWarning)
 import librosa
 
 MATPLOTLIB_FLAG = False
