@@ -56,8 +56,8 @@
     },
     "model": {
       "gin_channels": 192,
-      "n_speakers": 2,
-      "n_tones": 3,
+      "n_speakers": 9,
+      "n_tones": 4,
       "n_languages": 2,
 
       "monotonic_align": "sma_triton",
