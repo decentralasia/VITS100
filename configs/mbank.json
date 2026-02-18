@@ -48,8 +48,8 @@
       "mel_fmax": null,
       "add_blank": true,
 
-      "n_speakers": 2,
-      "n_tones": 3,
+      "n_speakers": 9,
+      "n_tones": 4,
       "n_languages": 2,
 
       "cleaned_text": false
