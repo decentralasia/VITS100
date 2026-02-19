@@ -27,7 +27,7 @@
     "data": {
       "use_mel_posterior_encoder": true,
       "training_files":[
-        "DUMMY1/train_filtered_manifest.txt",
+        "DUMMY1/train_filtered_manifest_ru.txt",
         "DUMMY1/manifests/alexander_vlasov.txt",
         "DUMMY1/manifests/kari.txt",
         "DUMMY1/manifests/nikolay.txt",
@@ -36,7 +36,7 @@
         "DUMMY1/manifests/larisa_actrisa.txt",
         "DUMMY1/manifests/rina.txt"
       ],
-      "validation_files":"DUMMY1/val_filtered_manifest.txt",
+      "validation_files":"DUMMY1/val_filtered_manifest_ru.txt",
       "text_cleaners":[],
       "max_wav_value": 32768.0,
       "sampling_rate": 22050,
