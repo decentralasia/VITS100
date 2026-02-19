@@ -9,9 +9,6 @@ from torch import nn, optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.amp import autocast, GradScaler
 import tqdm
 from pqmf import PQMF
@@ -50,15 +47,9 @@ global_step = 0
 
 # - base vits2 : Aug 29, 2023
 def main():
-    """Assume Single Node Multi GPUs Training Only"""
     assert torch.cuda.is_available(), "CPU training is not allowed."
-
-    n_gpus = torch.cuda.device_count()
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6066'
-
     hps = utils.get_hparams()
-    mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+    run(hps)
 
 
 def get_lr_lambda(warmup_steps, lr_decay, steps_per_epoch):
@@ -72,42 +63,37 @@ def get_lr_lambda(warmup_steps, lr_decay, steps_per_epoch):
     return lr_lambda
 
 
-def run(rank, n_gpus, hps):
+def run(hps):
     net_dur_disc = None
     global global_step
-    if rank == 0:
-        logger = utils.get_logger(hps.model_dir)
-        logger.info(hps)
-        utils.check_git_hash(hps.model_dir)
-        writer = SummaryWriter(log_dir=hps.model_dir)
-        writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
 
-        # Initialize wandb
-        wandb.init(
-            project=hps.wandb_project if hasattr(hps, 'wandb_project') else "vits2-training",
-            name=hps.model_dir.split('/')[-1],
-            config={
-                "learning_rate": hps.train.learning_rate,
-                "epochs": hps.train.epochs,
-                "batch_size": hps.train.batch_size,
-                "n_speakers": hps.data.n_speakers,
-                "n_tones": hps.data.n_tones,
-                "n_languages": hps.data.n_languages,
-                "segment_size": hps.train.segment_size,
-                "filter_length": hps.data.filter_length,
-                "hop_length": hps.data.hop_length,
-                "win_length": hps.data.win_length,
-                "mel_fmin": hps.data.mel_fmin,
-                "mel_fmax": hps.data.mel_fmax,
-            }
-        )
+    logger = utils.get_logger(hps.model_dir)
+    logger.info(hps)
+    utils.check_git_hash(hps.model_dir)
+    writer = SummaryWriter(log_dir=hps.model_dir)
+    writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
 
-    if os.name == 'nt':
-        dist.init_process_group(backend='gloo', init_method='env://', world_size=n_gpus, rank=rank)
-    else:
-        dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
+    # Initialize wandb
+    wandb.init(
+        project=hps.wandb_project if hasattr(hps, 'wandb_project') else "vits2-training",
+        name=hps.model_dir.split('/')[-1],
+        config={
+            "learning_rate": hps.train.learning_rate,
+            "epochs": hps.train.epochs,
+            "batch_size": hps.train.batch_size,
+            "n_speakers": hps.data.n_speakers,
+            "n_tones": hps.data.n_tones,
+            "n_languages": hps.data.n_languages,
+            "segment_size": hps.train.segment_size,
+            "filter_length": hps.data.filter_length,
+            "hop_length": hps.data.hop_length,
+            "win_length": hps.data.win_length,
+            "mel_fmin": hps.data.mel_fmin,
+            "mel_fmax": hps.data.mel_fmax,
+        }
+    )
+
     torch.manual_seed(hps.train.seed)
-    torch.cuda.set_device(rank)
 
     posterior_channels = 80
     hps.data.use_mel_posterior_encoder = True
@@ -120,18 +106,17 @@ def run(rank, n_gpus, hps):
         #[654, 814, 994, 1168, 1346, 1547, 1735, 1907, 2273],
         [414, 546, 687, 828, 974, 1141, 1355, 1636, 4777],
         #[1000, 2000],
-        num_replicas=n_gpus,
-        rank=rank,
+        num_replicas=1,
+        rank=0,
         shuffle=True)
 
     collate_fn = TextAudioSpeakerToneLangCollate()
     train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
                               collate_fn=collate_fn, batch_sampler=train_sampler)
-    if rank == 0:
-        eval_dataset = TextAudioSpeakerToneLangLoader(hps.data.validation_files, hps.data)
-        eval_loader = DataLoader(eval_dataset, num_workers=1, shuffle=False,
-                                 batch_size=hps.train.batch_size, pin_memory=True,
-                                 drop_last=False, collate_fn=collate_fn)
+    eval_dataset = TextAudioSpeakerToneLangLoader(hps.data.validation_files, hps.data)
+    eval_loader = DataLoader(eval_dataset, num_workers=1, shuffle=False,
+                             batch_size=hps.train.batch_size, pin_memory=True,
+                             drop_last=False, collate_fn=collate_fn)
     # some of these flags are not being used in the code and directly set in hps json file.
     # they are kept here for reference and prototyping.
 
@@ -182,7 +167,7 @@ def run(rank, n_gpus, hps):
                 3,
                 0.1,
                 gin_channels=hps.model.gin_channels if hps.data.n_speakers != 0 else 0,
-            ).cuda(rank)
+            ).cuda()
         elif duration_discriminator_type == "dur_disc_2":
             net_dur_disc = DurationDiscriminator2(
                 hps.model.hidden_channels,
@@ -190,7 +175,7 @@ def run(rank, n_gpus, hps):
                 3,
                 0.1,
                 gin_channels=hps.model.gin_channels if hps.data.n_speakers != 0 else 0,
-            ).cuda(rank)
+            ).cuda()
         '''
         net_dur_disc = DurationDiscriminator(
             hps.model.hidden_channels,
@@ -198,7 +183,7 @@ def run(rank, n_gpus, hps):
             3,
             0.1,
             gin_channels=hps.model.gin_channels if hps.data.n_speakers != 0 else 0,
-        ).cuda(rank)
+        ).cuda()
         '''
     else:
         print("NOT using any duration discriminator like VITS1")
@@ -211,8 +196,8 @@ def run(rank, n_gpus, hps):
         hps.train.segment_size // hps.data.hop_length,
         mas_noise_scale_initial=mas_noise_scale_initial,
         noise_scale_delta=noise_scale_delta,
-        **hps.model).cuda(rank)
-    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
+        **hps.model).cuda()
+    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda()
 
     optim_g = torch.optim.AdamW(
         net_g.parameters(),
@@ -234,12 +219,6 @@ def run(rank, n_gpus, hps):
     else:
         optim_dur_disc = None
 
-    net_g = DDP(net_g, device_ids=[rank], find_unused_parameters=False)
-    net_d = DDP(net_d, device_ids=[rank], find_unused_parameters=False)
-
-    if net_dur_disc is not None:  # 2의 경우
-        net_dur_disc = DDP(net_dur_disc, device_ids=[rank], find_unused_parameters=False)
-
     try:
         _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"), net_g,
                                                    optim_g)
@@ -251,13 +230,11 @@ def run(rank, n_gpus, hps):
         # epoch_str is actually the iteration/global_step from the checkpoint
         global_step = epoch_str + 1  # +1 to avoid re-triggering eval/log at the resumed step
         epoch_str = max(1, global_step // len(train_loader))
-        if rank == 0:
-            logger.info(f"Resuming from global_step: {global_step}, epoch: {epoch_str}")
+        logger.info(f"Resuming from global_step: {global_step}, epoch: {epoch_str}")
     except:
         epoch_str = 1
         global_step = 0
-        if rank == 0:
-            logger.info("Starting training from scratch")
+        logger.info("Starting training from scratch")
 
     # reset_lr=true: ignore checkpoint's LR, use config's learning_rate as base
     # reset_lr=false: continue with the LR schedule from the checkpoint
@@ -286,28 +263,19 @@ def run(rank, n_gpus, hps):
     scaler = GradScaler("cuda", enabled=hps.train.fp16_run)
 
     for epoch in range(epoch_str, hps.train.epochs + 1):
-        if rank == 0:
-            train_and_evaluate(rank, epoch, hps, [net_g, net_d, net_dur_disc], [optim_g, optim_d, optim_dur_disc],
-                               [scheduler_g, scheduler_d, scheduler_dur_disc], scaler, [train_loader, eval_loader],
-                               logger, [writer, writer_eval])
-        else:
-            train_and_evaluate(rank, epoch, hps, [net_g, net_d, net_dur_disc], [optim_g, optim_d, optim_dur_disc],
-                               [scheduler_g, scheduler_d, scheduler_dur_disc], scaler, [train_loader, None], None, None)
-    # Finish wandb run
-    if rank == 0:
-        wandb.finish()
+        train_and_evaluate(epoch, hps, [net_g, net_d, net_dur_disc], [optim_g, optim_d, optim_dur_disc],
+                           [scheduler_g, scheduler_d, scheduler_dur_disc], scaler, [train_loader, eval_loader],
+                           logger, [writer, writer_eval])
 
-    # Clean up distributed process group
-    dist.destroy_process_group()
+    wandb.finish()
 
 
-def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
+def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
     net_g, net_d, net_dur_disc = nets
     optim_g, optim_d, optim_dur_disc = optims
     scheduler_g, scheduler_d, scheduler_dur_disc = schedulers
     train_loader, eval_loader = loaders
-    if writers is not None:
-        writer, writer_eval = writers
+    writer, writer_eval = writers
 
     train_loader.batch_sampler.set_epoch(epoch)
     global global_step
@@ -332,18 +300,15 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if optim_dur_disc is not None:
         optim_dur_disc.zero_grad()
 
-    if rank == 0:
-        loader = tqdm.tqdm(train_loader, desc='Loading training data')
-    else:
-        loader = train_loader
+    loader = tqdm.tqdm(train_loader, desc='Loading training data')
     for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(loader):
-        if net_g.module.use_noise_scaled_mas:
-            current_mas_noise_scale = net_g.module.mas_noise_scale_initial - net_g.module.noise_scale_delta * global_step
-            net_g.module.current_mas_noise_scale = max(current_mas_noise_scale, 0.0)
-        x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(rank, non_blocking=True)
-        emphasis = emphasis.cuda(rank, non_blocking=True)
-        spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
-        y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
+        if net_g.use_noise_scaled_mas:
+            current_mas_noise_scale = net_g.mas_noise_scale_initial - net_g.noise_scale_delta * global_step
+            net_g.current_mas_noise_scale = max(current_mas_noise_scale, 0.0)
+        x, x_lengths = x.cuda(non_blocking=True), x_lengths.cuda(non_blocking=True)
+        emphasis = emphasis.cuda(non_blocking=True)
+        spec, spec_lengths = spec.cuda(non_blocking=True), spec_lengths.cuda(non_blocking=True)
+        y, y_lengths = y.cuda(non_blocking=True), y_lengths.cuda(non_blocking=True)
         sid, tid, lid = sid.cuda(non_blocking=True), tid.cuda(non_blocking=True), lid.cuda(non_blocking=True)
 
         is_step = (batch_idx + 1) % accum_steps == 0
@@ -432,112 +397,112 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             scaler.update()
 
         if is_step:
-            if rank == 0:
-                if global_step != 0 and global_step % hps.train.log_interval == 0:
-                    lr = optim_g.param_groups[0]['lr']
+            if global_step != 0 and global_step % hps.train.log_interval == 0:
+                lr = optim_g.param_groups[0]['lr']
 
-                    losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
+                losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
 
-                    logger.info('Train Epoch: {} [{:.0f}%]'.format(
-                        epoch,
-                        100. * batch_idx / len(train_loader)))
-                    logger.info([x.item() for x in losses] + [global_step, lr])
+                logger.info('Train Epoch: {} [{:.0f}%]'.format(
+                    epoch,
+                    100. * batch_idx / len(train_loader)))
+                logger.info([x.item() for x in losses] + [global_step, lr])
 
-                    scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr,
-                                   "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
+                scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr,
+                               "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
 
-                    if net_dur_disc is not None:
-                        scalar_dict.update(
-                            {"loss/dur_disc/total": loss_dur_disc_all, "grad_norm_dur_disc": grad_norm_dur_disc})
+                if net_dur_disc is not None:
                     scalar_dict.update(
-                        {"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl,
-                         "loss/g/subband": loss_subband})
+                        {"loss/dur_disc/total": loss_dur_disc_all, "grad_norm_dur_disc": grad_norm_dur_disc})
+                scalar_dict.update(
+                    {"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl,
+                     "loss/g/subband": loss_subband})
 
-                    scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
-                    scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
-                    scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
+                scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
+                scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
+                scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
 
-                    # Log to wandb
-                    def get_scalar(value):
-                        """Convert tensor or scalar to Python float"""
-                        return value.item() if torch.is_tensor(value) else float(value)
+                # Log to wandb
+                def get_scalar(value):
+                    """Convert tensor or scalar to Python float"""
+                    return value.item() if torch.is_tensor(value) else float(value)
 
-                    wandb_dict = {
-                        "train/loss_gen_total": get_scalar(loss_gen_all),
-                        "train/loss_disc_total": get_scalar(loss_disc_all),
-                        "train/loss_gen": get_scalar(loss_gen),
-                        "train/loss_disc": get_scalar(loss_disc),
-                        "train/loss_fm": get_scalar(loss_fm),
-                        "train/loss_mel": get_scalar(loss_mel),
-                        "train/loss_dur": get_scalar(loss_dur),
-                        "train/loss_kl": get_scalar(loss_kl),
-                        "train/loss_subband": get_scalar(loss_subband),
-                        "train/learning_rate": lr,
-                        "train/grad_norm_d": grad_norm_d,
-                        "train/grad_norm_g": grad_norm_g,
-                        "train/epoch": epoch,
-                    }
+                wandb_dict = {
+                    "train/loss_gen_total": get_scalar(loss_gen_all),
+                    "train/loss_disc_total": get_scalar(loss_disc_all),
+                    "train/loss_gen": get_scalar(loss_gen),
+                    "train/loss_disc": get_scalar(loss_disc),
+                    "train/loss_fm": get_scalar(loss_fm),
+                    "train/loss_mel": get_scalar(loss_mel),
+                    "train/loss_dur": get_scalar(loss_dur),
+                    "train/loss_kl": get_scalar(loss_kl),
+                    "train/loss_subband": get_scalar(loss_subband),
+                    "train/learning_rate": lr,
+                    "train/grad_norm_d": grad_norm_d,
+                    "train/grad_norm_g": grad_norm_g,
+                    "train/epoch": epoch,
+                }
 
-                    if net_dur_disc is not None:
-                        wandb_dict.update({
-                            "train/loss_dur_disc_total": get_scalar(loss_dur_disc_all),
-                            "train/loss_dur_gen": get_scalar(loss_dur_gen),
-                            "train/grad_norm_dur_disc": grad_norm_dur_disc,
-                        })
+                if net_dur_disc is not None:
+                    wandb_dict.update({
+                        "train/loss_dur_disc_total": get_scalar(loss_dur_disc_all),
+                        "train/loss_dur_gen": get_scalar(loss_dur_gen),
+                        "train/grad_norm_dur_disc": grad_norm_dur_disc,
+                    })
 
-                    for i, v in enumerate(losses_gen):
-                        wandb_dict[f"train/loss_gen_{i}"] = get_scalar(v)
-                    for i, v in enumerate(losses_disc_r):
-                        wandb_dict[f"train/loss_disc_r_{i}"] = get_scalar(v)
-                    for i, v in enumerate(losses_disc_g):
-                        wandb_dict[f"train/loss_disc_g_{i}"] = get_scalar(v)
+                for i, v in enumerate(losses_gen):
+                    wandb_dict[f"train/loss_gen_{i}"] = get_scalar(v)
+                for i, v in enumerate(losses_disc_r):
+                    wandb_dict[f"train/loss_disc_r_{i}"] = get_scalar(v)
+                for i, v in enumerate(losses_disc_g):
+                    wandb_dict[f"train/loss_disc_g_{i}"] = get_scalar(v)
 
-                    if net_dur_disc is not None:
-                        for i, v in enumerate(losses_dur_disc_r):
-                            wandb_dict[f"train/loss_dur_disc_r_{i}"] = get_scalar(v)
-                        for i, v in enumerate(losses_dur_disc_g):
-                            wandb_dict[f"train/loss_dur_disc_g_{i}"] = get_scalar(v)
+                if net_dur_disc is not None:
+                    for i, v in enumerate(losses_dur_disc_r):
+                        wandb_dict[f"train/loss_dur_disc_r_{i}"] = get_scalar(v)
+                    for i, v in enumerate(losses_dur_disc_g):
+                        wandb_dict[f"train/loss_dur_disc_g_{i}"] = get_scalar(v)
 
-                    wandb.log(wandb_dict, step=global_step)
+                wandb.log(wandb_dict, step=global_step)
 
-                if global_step != 0 and global_step % hps.train.eval_interval == 0:
-                    print("Doing evaluation  ", global_step)
-                    global best_checkpoints
-                    val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
+            if global_step != 0 and global_step % hps.train.eval_interval == 0:
+                print("Doing evaluation  ", global_step)
+                global best_checkpoints
+                val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
 
-                    # Determine if this checkpoint should be saved (top 3 by smallest val_loss)
-                    should_save = False
-                    step_to_remove = None
+                # Determine if this checkpoint should be saved (top 3 by smallest val_loss)
+                should_save = False
+                step_to_remove = None
 
-                    if len(best_checkpoints) < 3:
+                if len(best_checkpoints) < 3:
+                    should_save = True
+                    heapq.heappush(best_checkpoints, (-val_loss, global_step))
+                else:
+                    worst_loss, worst_step = best_checkpoints[0]
+                    worst_loss = -worst_loss
+                    if val_loss < worst_loss:
                         should_save = True
+                        heapq.heappop(best_checkpoints)
+                        step_to_remove = worst_step
                         heapq.heappush(best_checkpoints, (-val_loss, global_step))
-                    else:
-                        worst_loss, worst_step = best_checkpoints[0]
-                        worst_loss = -worst_loss
-                        if val_loss < worst_loss:
-                            should_save = True
-                            heapq.heappop(best_checkpoints)
-                            step_to_remove = worst_step
-                            heapq.heappush(best_checkpoints, (-val_loss, global_step))
 
-                    if should_save:
-                        logger.info(f"Saving checkpoint at step {global_step} with val_loss={val_loss:.6f}")
-                        utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
-                                              os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
-                        utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
-                                              os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
-                        if net_dur_disc is not None:
-                            utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
-                                                  os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
-                        if step_to_remove is not None:
-                            logger.info(f"Removing checkpoint at step {step_to_remove} (worse val_loss)")
-                            for prefix in ["G_", "D_", "DUR_"]:
-                                old_ckpt = os.path.join(hps.model_dir, f"{prefix}{step_to_remove}.pth")
-                                if os.path.exists(old_ckpt):
-                                    os.remove(old_ckpt)
-                    else:
-                        logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
+                if should_save:
+                    logger.info(f"Saving checkpoint at step {global_step} with val_loss={val_loss:.6f}")
+                    utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, global_step,
+                                          os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
+                    utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, global_step,
+                                          os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
+                    if net_dur_disc is not None:
+                        utils.save_checkpoint(net_dur_disc, optim_dur_disc, hps.train.learning_rate, global_step,
+                                              os.path.join(hps.model_dir, "DUR_{}.pth".format(global_step)))
+                    if step_to_remove is not None:
+                        logger.info(f"Removing checkpoint at step {step_to_remove} (worse val_loss)")
+                        for prefix in ["G_", "D_", "DUR_"]:
+                            old_ckpt = os.path.join(hps.model_dir, f"{prefix}{step_to_remove}.pth")
+                            if os.path.exists(old_ckpt):
+                                os.remove(old_ckpt)
+                else:
+                    logger.info(f"Skipping checkpoint at step {global_step} (val_loss={val_loss:.6f} not in top 3)")
+
             scheduler_g.step()
             scheduler_d.step()
             if scheduler_dur_disc is not None:
@@ -545,8 +510,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
             global_step += 1
 
-    if rank == 0:
-        logger.info('====> Epoch: {}'.format(epoch))
+    logger.info('====> Epoch: {}'.format(epoch))
 
 def evaluate(hps, generator, eval_loader, writer_eval):
     generator.eval()
@@ -559,11 +523,11 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     with torch.no_grad():
         for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(eval_loader):
-            x, x_lengths = x.cuda(0), x_lengths.cuda(0)
-            emphasis = emphasis.cuda(0)
-            spec, spec_lengths = spec.cuda(0), spec_lengths.cuda(0)
-            y, y_lengths = y.cuda(0), y_lengths.cuda(0)
-            sid, tid, lid = sid.cuda(0), tid.cuda(0), lid.cuda(0)
+            x, x_lengths = x.cuda(), x_lengths.cuda()
+            emphasis = emphasis.cuda()
+            spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
+            y, y_lengths = y.cuda(), y_lengths.cuda()
+            sid, tid, lid = sid.cuda(), tid.cuda(), lid.cuda()
 
             # Forward pass through the model to compute losses
             y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
@@ -603,7 +567,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     ky_text = 'рыноктук шартка ылайыкташкан ушул ишканалар өнөр жай, курулуш, транспорт, соода же тейлөөнүн башка тармактарына таандык.'
     ru_text = 'бишкек столица кыргызстана. а в эмбанке есть бишкек.'
-    device = generator.device
+    device = next(generator.parameters()).device
     ky_text, is_highlighted_ky = eval_loader.dataset.get_text(ky_text, lid="ky")
     ky_text = ky_text.to(device).unsqueeze(0)
     is_highlighted_ky = is_highlighted_ky.to(device).unsqueeze(0)
@@ -650,15 +614,15 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         new_speaker_specs[name] = spec_ref.unsqueeze(0).to(device)
 
     with torch.no_grad():
-        audio_timur_ky = generator.module.infer(ky_text, spec=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_timur_ru = generator.module.infer(ru_text, spec=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ky = generator.module.infer(ky_text, spec=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
-        audio_aiganysh_ru = generator.module.infer(ru_text, spec=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ky = generator.infer(ky_text, spec=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_timur_ru = generator.infer(ru_text, spec=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ky = generator.infer(ky_text, spec=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
+        audio_aiganysh_ru = generator.infer(ru_text, spec=spec_ref_aiganysh_ru, emphasis=is_highlighted_ru, sid=sid_1, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
 
         new_speaker_audios = {}
         for name, sid_val in new_speakers:
             sid_new = torch.LongTensor([sid_val]).to(device)
-            audio = generator.module.infer(ru_text, spec=new_speaker_specs[name], emphasis=is_highlighted_ru, sid=sid_new, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
+            audio = generator.infer(ru_text, spec=new_speaker_specs[name], emphasis=is_highlighted_ru, sid=sid_new, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
             new_speaker_audios[name] = audio
 
 
@@ -710,5 +674,4 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 # sed -i 's/\xC2\xA0/ /g' file.txt
 # sed -i "s/<inhаl>е>/<inhale>/g" DUMMY1/train_filtered_manifest.txt
 if __name__ == "__main__":
-    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     main()
