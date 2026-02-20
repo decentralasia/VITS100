@@ -252,7 +252,10 @@ def run(hps):
     accum_steps = getattr(hps.train, "grad_accum_steps", 1)
     steps_per_epoch = len(train_loader) // accum_steps
     lr_lambda_fn = get_lr_lambda(warmup_steps, hps.train.lr_decay, steps_per_epoch)
-    last_step = max(global_step - 1, -1)
+    if getattr(hps.train, "reset_lr", False):
+        last_step = -1
+    else:
+        last_step = max(global_step - 1, -1)
 
     scheduler_g = torch.optim.lr_scheduler.LambdaLR(optim_g, lr_lambda=lr_lambda_fn, last_epoch=last_step)
     scheduler_d = torch.optim.lr_scheduler.LambdaLR(optim_d, lr_lambda=lr_lambda_fn, last_epoch=last_step)
@@ -315,69 +318,78 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
 
         is_step = (batch_idx + 1) % accum_steps == 0
 
-        with autocast("cuda", enabled=hps.train.fp16_run):
-            y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (
-                hidden_x, logw, logw_) = net_g(x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid)
+        try:
+            with autocast("cuda", enabled=hps.train.fp16_run):
+                y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), (
+                    hidden_x, logw, logw_) = net_g(x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid)
 
-            mel = spec
-            y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
-            y_hat_mel = mel_spectrogram_torch(
-                y_hat.squeeze(1),
-                hps.data.filter_length,
-                hps.data.n_mel_channels,
-                hps.data.sampling_rate,
-                hps.data.hop_length,
-                hps.data.win_length,
-                hps.data.mel_fmin,
-                hps.data.mel_fmax
-            )
+                mel = spec
+                y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+                y_hat_mel = mel_spectrogram_torch(
+                    y_hat.squeeze(1),
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sampling_rate,
+                    hps.data.hop_length,
+                    hps.data.win_length,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax
+                )
 
-            y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
+                y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
 
-            # Discriminator
-            y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-            with autocast("cuda", enabled=False):
-                loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
-                loss_disc_all = loss_disc
-
-            # Duration Discriminator
-            if net_dur_disc is not None:
-                y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x.detach(), x_mask.detach(), logw_.detach(),
-                                                        logw.detach())  # logw is predicted duration, logw_ is real duration
+                # Discriminator
+                y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
                 with autocast("cuda", enabled=False):
-                    # TODO: I think need to mean using the mask, but for now, just mean all
-                    loss_dur_disc, losses_dur_disc_r, losses_dur_disc_g = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
-                    loss_dur_disc_all = loss_dur_disc
-                scaler.scale(loss_dur_disc_all / accum_steps).backward()
+                    loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
+                    loss_disc_all = loss_disc
 
-        scaler.scale(loss_disc_all / accum_steps).backward()
-
-        with autocast("cuda", enabled=hps.train.fp16_run):
-            # Generator
-            y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
-            if net_dur_disc is not None:
-                y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x, x_mask, logw_, logw)
-            with autocast("cuda", enabled=False):
-                loss_dur = torch.sum(l_length.float())
-                loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-
-                loss_fm = feature_loss(fmap_r, fmap_g)
-                loss_gen, losses_gen = generator_loss(y_d_hat_g)
-
-                if hps.model.mb_istft_vits == True:
-                    pqmf = PQMF(y.device)
-                    y_mb = pqmf.analysis(y)
-                    loss_subband = subband_stft_loss(hps, y_mb, y_hat_mb)
-                else:
-                    loss_subband = torch.tensor(0.0)
-
-                loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl + loss_subband
+                # Duration Discriminator
                 if net_dur_disc is not None:
-                    loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
-                    loss_gen_all += loss_dur_gen
+                    y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x.detach(), x_mask.detach(), logw_.detach(),
+                                                            logw.detach())  # logw is predicted duration, logw_ is real duration
+                    with autocast("cuda", enabled=False):
+                        # TODO: I think need to mean using the mask, but for now, just mean all
+                        loss_dur_disc, losses_dur_disc_r, losses_dur_disc_g = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
+                        loss_dur_disc_all = loss_dur_disc
+                    scaler.scale(loss_dur_disc_all / accum_steps).backward()
 
-        scaler.scale(loss_gen_all / accum_steps).backward()
+            scaler.scale(loss_disc_all / accum_steps).backward()
+
+            with autocast("cuda", enabled=hps.train.fp16_run):
+                # Generator
+                y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
+                if net_dur_disc is not None:
+                    y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x, x_mask, logw_, logw)
+                with autocast("cuda", enabled=False):
+                    loss_dur = torch.sum(l_length.float())
+                    loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
+                    loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
+
+                    loss_fm = feature_loss(fmap_r, fmap_g)
+                    loss_gen, losses_gen = generator_loss(y_d_hat_g)
+
+                    if hps.model.mb_istft_vits == True:
+                        pqmf = PQMF(y.device)
+                        y_mb = pqmf.analysis(y)
+                        loss_subband = subband_stft_loss(hps, y_mb, y_hat_mb)
+                    else:
+                        loss_subband = torch.tensor(0.0)
+
+                    loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl + loss_subband
+                    if net_dur_disc is not None:
+                        loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
+                        loss_gen_all += loss_dur_gen
+
+            scaler.scale(loss_gen_all / accum_steps).backward()
+        except torch.cuda.OutOfMemoryError:
+            print(f"  [train] Skipping batch {batch_idx} (OOM, max_spec_len={spec_lengths.max().item()})")
+            optim_g.zero_grad()
+            optim_d.zero_grad()
+            if optim_dur_disc is not None:
+                optim_dur_disc.zero_grad()
+            torch.cuda.empty_cache()
+            continue
 
         if is_step:
             scaler.unscale_(optim_d)
@@ -468,6 +480,7 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
 
             if global_step != 0 and global_step % hps.train.eval_interval == 0:
                 print("Doing evaluation  ", global_step)
+                torch.cuda.empty_cache()
                 global best_checkpoints
                 val_loss = evaluate(hps, net_g, eval_loader, writer_eval)
 
@@ -525,41 +538,45 @@ def evaluate(hps, generator, eval_loader, writer_eval):
 
     with torch.no_grad():
         for batch_idx, (x, x_lengths, emphasis, spec, spec_lengths, y, y_lengths, sid, tid, lid) in enumerate(eval_loader):
-            x, x_lengths = x.cuda(), x_lengths.cuda()
-            emphasis = emphasis.cuda()
-            spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
-            y, y_lengths = y.cuda(), y_lengths.cuda()
-            sid, tid, lid = sid.cuda(), tid.cuda(), lid.cuda()
+            try:
+                x, x_lengths = x.cuda(), x_lengths.cuda()
+                emphasis = emphasis.cuda()
+                spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
+                y, y_lengths = y.cuda(), y_lengths.cuda()
+                sid, tid, lid = sid.cuda(), tid.cuda(), lid.cuda()
 
-            # Forward pass through the model to compute losses
-            y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
-                x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
-            )
+                # Forward pass through the model to compute losses
+                y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
+                    x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
+                )
 
-            mel = spec
+                mel = spec
 
-            y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
-            y_hat_mel = mel_spectrogram_torch(
-                y_hat.squeeze(1),
-                hps.data.filter_length,
-                hps.data.n_mel_channels,
-                hps.data.sampling_rate,
-                hps.data.hop_length,
-                hps.data.win_length,
-                hps.data.mel_fmin,
-                hps.data.mel_fmax
-            )
+                y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+                y_hat_mel = mel_spectrogram_torch(
+                    y_hat.squeeze(1),
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sampling_rate,
+                    hps.data.hop_length,
+                    hps.data.win_length,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax
+                )
 
-            # Calculate losses
-            mel_loss = F.l1_loss(y_mel, y_hat_mel)
-            kl_loss_val = kl_loss(z_p, logs_q, m_p, logs_p, z_mask)
-            dur_loss = torch.sum(l_length.float())
+                # Calculate losses
+                mel_loss = F.l1_loss(y_mel, y_hat_mel)
+                kl_loss_val = kl_loss(z_p, logs_q, m_p, logs_p, z_mask)
+                dur_loss = torch.sum(l_length.float())
 
-            # Accumulate losses
-            total_mel_loss += mel_loss.item()
-            total_kl_loss += kl_loss_val.item()
-            total_dur_loss += dur_loss.item()
-            num_batches += 1
+                # Accumulate losses
+                total_mel_loss += mel_loss.item()
+                total_kl_loss += kl_loss_val.item()
+                total_dur_loss += dur_loss.item()
+                num_batches += 1
+            except torch.cuda.OutOfMemoryError:
+                print(f"  [eval] Skipping batch {batch_idx} (OOM, max_spec_len={spec_lengths.max().item()})")
+                torch.cuda.empty_cache()
 
 
     # Compute average losses
