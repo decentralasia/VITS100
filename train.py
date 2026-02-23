@@ -97,7 +97,7 @@ def run(hps):
 
     posterior_channels = 80
     hps.data.use_mel_posterior_encoder = True
-
+    boundaries = 2 * [32, 300, 400, 500, 600, 700, 800, 900, 1000]
     train_dataset = TextAudioSpeakerToneLangLoader(hps.data.training_files, hps.data)
     train_sampler = DistributedBucketSampler(
         train_dataset,
@@ -106,8 +106,9 @@ def run(hps):
         #[654, 814, 994, 1168, 1346, 1547, 1735, 1907, 2273],
         #[414, 546, 687, 828, 974, 1141, 1355, 1636, 4777],
         #[32, 414, 546, 687, 828, 974, 1141, 1355, 1636, 2000],
-        [32, 300, 400, 500, 600, 700, 800, 900, 1000],
+        #[32, 300, 400, 500, 600, 700, 800, 900, 1000],
         #[1000, 2000],
+        boundaries,
         num_replicas=1,
         rank=0,
         shuffle=True)
