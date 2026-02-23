@@ -357,6 +357,12 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
 
             scaler.scale(loss_disc_all / accum_steps).backward()
 
+            # Freeze discriminator params during G step to prevent
+            # G's backward from polluting D's accumulated gradients
+            net_d.requires_grad_(False)
+            if net_dur_disc is not None:
+                net_dur_disc.requires_grad_(False)
+
             with autocast("cuda", enabled=hps.train.fp16_run):
                 # Generator
                 y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
@@ -383,8 +389,17 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
                         loss_gen_all += loss_dur_gen
 
             scaler.scale(loss_gen_all / accum_steps).backward()
+
+            # Unfreeze discriminator params for next iteration
+            net_d.requires_grad_(True)
+            if net_dur_disc is not None:
+                net_dur_disc.requires_grad_(True)
         except torch.cuda.OutOfMemoryError:
             print(f"  [train] Skipping batch {batch_idx} (OOM, max_spec_len={spec_lengths.max().item()})")
+            # Ensure discriminators are unfrozen in case OOM occurred during G step
+            net_d.requires_grad_(True)
+            if net_dur_disc is not None:
+                net_dur_disc.requires_grad_(True)
             optim_g.zero_grad()
             optim_d.zero_grad()
             if optim_dur_disc is not None:
