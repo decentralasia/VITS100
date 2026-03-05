@@ -47,17 +47,17 @@
       "mel_fmax": null,
       "add_blank": true,
 
-      "n_speakers": 7,
-      "n_tones": 1,
-      "n_languages": 1,
+      "n_speakers": 9,
+      "n_tones": 4,
+      "n_languages": 2,
 
       "cleaned_text": false
     },
     "model": {
       "gin_channels": 192,
-      "n_speakers": 7,
-      "n_tones": 1,
-      "n_languages": 1,
+      "n_speakers": 9,
+      "n_tones": 4,
+      "n_languages": 2,
 
       "monotonic_align": "sma_triton",
       "use_mel_posterior_encoder": true,
