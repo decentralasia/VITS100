@@ -278,13 +278,13 @@ def main():
     args = parser.parse_args()
 
     if args.lang == "ky":
-        config = "/mnt/d/m/kg/config.json"
-        checkpoint = "/mnt/d/m/kg/G_69000.pth"
-        output = "/home/k_arzymatov/PycharmProjects/VITS100/inference/triton_repo/vits-ky-synthesis/1/model.onnx"
+        config = "/home/fudo/kenenbek/m/kg/config.json"
+        checkpoint = "/home/fudo/kenenbek/m/kg/G_69000.pth"
+        output = "./model_ky.onnx"
     elif args.lang == "ru":
-        config = "/mnt/d/m/ru/config.json"
-        checkpoint = "/mnt/d/m/ru/G_89000.pth"
-        output = "/home/k_arzymatov/PycharmProjects/VITS100/inference/triton_repo/vits-ru-synthesis/1/model.onnx"
+        config = "/home/fudo/kenenbek/m/ru/config.json"
+        checkpoint = "/home/fudo/kenenbek/m/ru/G_89000.pth"
+        output = "./model_ru.onnx"
     else:
         raise NotImplementedError
 
