@@ -2,7 +2,7 @@
 # Convert ONNX models to TensorRT .plan files for Triton.
 #
 # Prerequisites:
-#   - ONNX models already exported to triton_repo/vits-{ky,ru}-synthesis/1/model.onnx
+#   - ONNX models model_ky.onnx and model_ru.onnx in the current directory
 #   - Docker with NVIDIA runtime
 #
 # Usage:
@@ -14,28 +14,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INFERENCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-KY_MODEL_DIR="$INFERENCE_DIR/triton_repo/vits-ky-synthesis/1"
-RU_MODEL_DIR="$INFERENCE_DIR/triton_repo/vits-ru-synthesis/1"
 
 # TensorRT 10.9 container — must match the Triton server version
 TRT_IMAGE="nvcr.io/nvidia/tensorrt:25.04-py3"
 
 build_plan() {
-    local MODEL_DIR="$1"
-    local LABEL="$2"
+    local ONNX_FILE="$1"
+    local PLAN_FILE="$2"
+    local LABEL="$3"
 
-    if [ ! -f "$MODEL_DIR/model.onnx" ]; then
-        echo "❌ ONNX not found: $MODEL_DIR/model.onnx"
+    if [ ! -f "$SCRIPT_DIR/$ONNX_FILE" ]; then
+        echo "❌ ONNX not found: $SCRIPT_DIR/$ONNX_FILE"
         return 1
     fi
 
     echo ""
     echo "════════════════════════════════════════════════════"
     echo "Building TensorRT plan: $LABEL"
-    echo "  ONNX:   $MODEL_DIR/model.onnx"
-    echo "  Output: $MODEL_DIR/model.plan"
+    echo "  ONNX:   $SCRIPT_DIR/$ONNX_FILE"
+    echo "  Output: $SCRIPT_DIR/$PLAN_FILE"
     echo "════════════════════════════════════════════════════"
 
     # Dynamic shape profiles for baked ONNX inputs:
@@ -48,12 +45,12 @@ build_plan() {
     docker run --rm \
         --privileged \
         --runtime=nvidia \
-        -v "$MODEL_DIR:/workspace" \
+        -v "$SCRIPT_DIR:/workspace" \
         "$TRT_IMAGE" \
         bash -c "
             cd /workspace && \
-            trtexec --onnx=model.onnx \
-                --saveEngine=model.plan \
+            trtexec --onnx=$ONNX_FILE \
+                --saveEngine=$PLAN_FILE \
                 --minShapes=input:1x1,emphasis:1x1,sid:1,tid:1,lid:1 \
                 --optShapes=input:1x250,emphasis:1x250,sid:1,tid:1,lid:1 \
                 --maxShapes=input:1x500,emphasis:1x500,sid:1,tid:1,lid:1 \
@@ -61,12 +58,12 @@ build_plan() {
                 --verbose
         "
 
-    if [ $? -eq 0 ] && [ -f "$MODEL_DIR/model.plan" ]; then
+    if [ $? -eq 0 ] && [ -f "$SCRIPT_DIR/$PLAN_FILE" ]; then
         local SIZE
-        SIZE=$(du -h "$MODEL_DIR/model.plan" | cut -f1)
-        echo "✅ $LABEL: model.plan ($SIZE)"
+        SIZE=$(du -h "$SCRIPT_DIR/$PLAN_FILE" | cut -f1)
+        echo "✅ $LABEL: $PLAN_FILE ($SIZE)"
     else
-        echo "❌ $LABEL: model.plan was NOT created"
+        echo "❌ $LABEL: $PLAN_FILE was NOT created"
         return 1
     fi
 }
@@ -76,14 +73,14 @@ TARGET="${1:-all}"
 
 case "$TARGET" in
     ky)
-        build_plan "$KY_MODEL_DIR" "Kyrgyz"
+        build_plan "model_ky.onnx" "model_ky.plan" "Kyrgyz"
         ;;
     ru)
-        build_plan "$RU_MODEL_DIR" "Russian"
+        build_plan "model_ru.onnx" "model_ru.plan" "Russian"
         ;;
     all)
-        build_plan "$KY_MODEL_DIR" "Kyrgyz"
-        build_plan "$RU_MODEL_DIR" "Russian"
+        build_plan "model_ky.onnx" "model_ky.plan" "Kyrgyz"
+        build_plan "model_ru.onnx" "model_ru.plan" "Russian"
         ;;
     *)
         echo "Usage: $0 [ky|ru|all]"
@@ -92,5 +89,4 @@ case "$TARGET" in
 esac
 
 echo ""
-echo "Done. Place model.plan files in triton_repo/vits-{ky,ru}-synthesis/1/"
-echo "Then start Triton: bash ../start_triton_server.sh"
+echo "Done. You can now move model_ky.plan and model_ru.plan to their respective triton_repo directories."
