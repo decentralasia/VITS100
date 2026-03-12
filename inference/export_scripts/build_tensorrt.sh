@@ -36,11 +36,15 @@ build_plan() {
     echo "════════════════════════════════════════════════════"
 
     # Dynamic shape profiles for baked ONNX inputs:
-    #   input:    [B, T]  INT64  phoneme token IDs    (B, T are dynamic)
-    #   emphasis: [B, T]  INT64  emphasis/highlight    (B, T are dynamic)
-    #   sid:      [B]     INT64  speaker ID            (B is dynamic)
-    #   tid:      [B]     INT64  tone ID               (B is dynamic)
-    #   lid:      [B]     INT64  language ID            (B is dynamic)
+    #   input:            [B, T]  INT64  phoneme token IDs    (B, T are dynamic)
+    #   emphasis:         [B, T]  INT64  emphasis/highlight    (B, T are dynamic)
+    #   sid:              [B]     INT64  speaker ID            (B is dynamic)
+    #   tid:              [B]     INT64  tone ID               (B is dynamic)
+    #   lid:              [B]     INT64  language ID            (B is dynamic)
+    #   input_ids_length: [B]     INT64  actual token count    (B is dynamic)
+    #   duration_perc:    [B, T]  FP32   duration pct          (unused, ensemble compat)
+    #   duration_force_ms:[B, T]  INT64  forced durations      (unused, ensemble compat)
+    #   scales:           [B, 3]  FP32   inference scales      (unused, ensemble compat)
 
     docker run --rm \
         --privileged \
@@ -51,9 +55,9 @@ build_plan() {
             cd /workspace && \
             trtexec --onnx=$ONNX_FILE \
                 --saveEngine=$PLAN_FILE \
-                --minShapes=input:1x1,emphasis:1x1,sid:1,tid:1,lid:1 \
-                --optShapes=input:16x250,emphasis:16x250,sid:16,tid:16,lid:16 \
-                --maxShapes=input:32x500,emphasis:32x500,sid:32,tid:32,lid:32 \
+                --minShapes=input:1x1,emphasis:1x1,sid:1,tid:1,lid:1,input_ids_length:1,duration_perc:1x1,duration_force_ms:1x1,scales:1x3 \
+                --optShapes=input:16x250,emphasis:16x250,sid:16,tid:16,lid:16,input_ids_length:16,duration_perc:16x250,duration_force_ms:16x250,scales:16x3 \
+                --maxShapes=input:32x500,emphasis:32x500,sid:32,tid:32,lid:32,input_ids_length:32,duration_perc:32x500,duration_force_ms:32x500,scales:32x3 \
                 --fp16 \
                 --verbose
         "

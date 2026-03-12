@@ -192,14 +192,19 @@ def export(config, checkpoint, voices_dir, output):
     HOP_LENGTH = hps.data.hop_length
 
     # ONNX-compatible forward wrapper
-    def infer_forward(text, emphasis, sid, tid, lid):
+    def infer_forward(text, emphasis, sid, tid, lid,
+                      input_ids_length, duration_perc, duration_force_ms, scales):
         """
         Inputs:
-            text:     [B, T]  INT64  phoneme token IDs
-            emphasis: [B, T]  INT64  emphasis/highlight mask
-            sid:      [B]     INT64  speaker ID
-            tid:      [B]     INT64  tone ID
-            lid:      [B]     INT64  language ID
+            text:              [B, T]  INT64  phoneme token IDs
+            emphasis:          [B, T]  INT64  emphasis/highlight mask
+            sid:               [B]     INT64  speaker ID
+            tid:               [B]     INT64  tone ID
+            lid:               [B]     INT64  language ID
+            input_ids_length:  [B]     INT64  actual token count per sample
+            duration_perc:     [B, T]  FP32   (unused, ensemble compatibility)
+            duration_force_ms: [B, T]  INT64  (unused, ensemble compatibility)
+            scales:            [B, 3]  FP32   (unused, ensemble compatibility)
 
         Outputs:
             raw_waveform: [B, 1, T_audio]  FP32  (fixed size = MAX_MEL_LENGTH * hop_length)
@@ -222,6 +227,15 @@ def export(config, checkpoint, voices_dir, output):
         audio = result[0]                      # [B, 1, T] — keep channel dim to match OLD vocoder output
         y_lengths = result[5] * HOP_LENGTH  # convert mel frames → audio samples
         y_lengths = y_lengths.to(torch.int64)
+
+        # Keep unused inputs in the ONNX graph so TensorRT doesn't prune them.
+        # These are required by the Triton ensemble wiring (OLD reference compat).
+        _unused = (input_ids_length.sum()
+                   + duration_perc.sum()
+                   + duration_force_ms.float().sum()
+                   + scales.sum()) * 0
+        audio = audio + _unused
+
         return audio, y_lengths
 
     # Prepare for export
@@ -241,6 +255,10 @@ def export(config, checkpoint, voices_dir, output):
         torch.zeros(B, dtype=torch.int64),                           # sid
         torch.zeros(B, dtype=torch.int64),                           # tid
         torch.zeros(B, dtype=torch.int64),                           # lid
+        torch.tensor([T], dtype=torch.int64),                        # input_ids_length
+        torch.zeros(B, T, dtype=torch.float32),                      # duration_perc
+        torch.zeros(B, T, dtype=torch.int64),                        # duration_force_ms
+        torch.zeros(B, 3, dtype=torch.float32),                      # scales
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
@@ -252,16 +270,21 @@ def export(config, checkpoint, voices_dir, output):
         verbose=False,
         opset_version=17,
         training=TrainingMode.EVAL,
-        input_names=["input", "emphasis", "sid", "tid", "lid"],
+        input_names=["input", "emphasis", "sid", "tid", "lid",
+                     "input_ids_length", "duration_perc", "duration_force_ms", "scales"],
         output_names=["raw_waveform", "y_length"],
         dynamic_axes={
-            "input":        {0: "batch_size", 1: "phonemes"},
-            "emphasis":     {0: "batch_size", 1: "phonemes"},
-            "sid":          {0: "batch_size"},
-            "tid":          {0: "batch_size"},
-            "lid":          {0: "batch_size"},
-            "raw_waveform": {0: "batch_size"},
-            "y_length":     {0: "batch_size"},
+            "input":            {0: "batch_size", 1: "phonemes"},
+            "emphasis":         {0: "batch_size", 1: "phonemes"},
+            "sid":              {0: "batch_size"},
+            "tid":              {0: "batch_size"},
+            "lid":              {0: "batch_size"},
+            "input_ids_length": {0: "batch_size"},
+            "duration_perc":    {0: "batch_size", 1: "phonemes"},
+            "duration_force_ms":{0: "batch_size", 1: "phonemes"},
+            "scales":           {0: "batch_size"},
+            "raw_waveform":     {0: "batch_size"},
+            "y_length":         {0: "batch_size"},
         },
     )
 
