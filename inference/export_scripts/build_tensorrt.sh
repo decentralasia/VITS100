@@ -36,11 +36,11 @@ build_plan() {
     echo "════════════════════════════════════════════════════"
 
     # Dynamic shape profiles for baked ONNX inputs:
-    #   input:    [1, T]  INT32  phoneme token IDs    (T is dynamic)
-    #   emphasis: [1, T]  INT32  emphasis/highlight    (T is dynamic)
-    #   sid:      [1]     INT32  speaker ID            (scalar, batch=1)
-    #   tid:      [1]     INT32  tone ID               (scalar, batch=1)
-    #   lid:      [1]     INT32  language ID            (scalar, batch=1)
+    #   input:    [B, T]  INT64  phoneme token IDs    (B, T are dynamic)
+    #   emphasis: [B, T]  INT64  emphasis/highlight    (B, T are dynamic)
+    #   sid:      [B]     INT64  speaker ID            (B is dynamic)
+    #   tid:      [B]     INT64  tone ID               (B is dynamic)
+    #   lid:      [B]     INT64  language ID            (B is dynamic)
 
     docker run --rm \
         --privileged \
@@ -52,8 +52,8 @@ build_plan() {
             trtexec --onnx=$ONNX_FILE \
                 --saveEngine=$PLAN_FILE \
                 --minShapes=input:1x1,emphasis:1x1,sid:1,tid:1,lid:1 \
-                --optShapes=input:1x250,emphasis:1x250,sid:1,tid:1,lid:1 \
-                --maxShapes=input:1x500,emphasis:1x500,sid:1,tid:1,lid:1 \
+                --optShapes=input:16x250,emphasis:16x250,sid:16,tid:16,lid:16 \
+                --maxShapes=input:32x500,emphasis:32x500,sid:32,tid:32,lid:32 \
                 --fp16 \
                 --verbose
         "

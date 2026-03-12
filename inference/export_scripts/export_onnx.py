@@ -195,15 +195,15 @@ def export(config, checkpoint, voices_dir, output):
     def infer_forward(text, emphasis, sid, tid, lid):
         """
         Inputs:
-            text:     [B, T]  INT32  phoneme token IDs
-            emphasis: [B, T]  INT32  emphasis/highlight mask
-            sid:      [B]     INT32  speaker ID
-            tid:      [B]     INT32  tone ID
-            lid:      [B]     INT32  language ID
+            text:     [B, T]  INT64  phoneme token IDs
+            emphasis: [B, T]  INT64  emphasis/highlight mask
+            sid:      [B]     INT64  speaker ID
+            tid:      [B]     INT64  tone ID
+            lid:      [B]     INT64  language ID
 
         Outputs:
-            raw_waveform: [B, T_audio]  FP32  (fixed size = MAX_MEL_LENGTH * hop_length)
-            y_length:     [B]           INT32  (actual valid audio length in samples)
+            raw_waveform: [B, 1, T_audio]  FP32  (fixed size = MAX_MEL_LENGTH * hop_length)
+            y_length:     [B]              INT64  (actual valid audio length in samples)
         """
         idx = lid.long() * N_SPEAKERS * N_TONES + sid.long() * N_TONES + tid.long()
         spec = net_g.ref_specs[idx]
@@ -219,9 +219,9 @@ def export(config, checkpoint, voices_dir, output):
             spec_lengths=spec_len,
             max_y_length=MAX_MEL_LENGTH,
         )
-        audio = result[0].squeeze(1)        # [B, 1, T] → [B, T]
+        audio = result[0]                      # [B, 1, T] — keep channel dim to match OLD vocoder output
         y_lengths = result[5] * HOP_LENGTH  # convert mel frames → audio samples
-        y_lengths = y_lengths.to(torch.int32)
+        y_lengths = y_lengths.to(torch.int64)
         return audio, y_lengths
 
     # Prepare for export
@@ -236,11 +236,11 @@ def export(config, checkpoint, voices_dir, output):
     B = 1
     T = 50
     dummy_inputs = (
-        torch.randint(0, num_symbols, (B, T), dtype=torch.int32),  # text
-        torch.zeros(B, T, dtype=torch.int32),                       # emphasis
-        torch.zeros(B, dtype=torch.int32),                           # sid
-        torch.zeros(B, dtype=torch.int32),                           # tid
-        torch.zeros(B, dtype=torch.int32),                           # lid
+        torch.randint(0, num_symbols, (B, T), dtype=torch.int64),  # text
+        torch.zeros(B, T, dtype=torch.int64),                       # emphasis
+        torch.zeros(B, dtype=torch.int64),                           # sid
+        torch.zeros(B, dtype=torch.int64),                           # tid
+        torch.zeros(B, dtype=torch.int64),                           # lid
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
