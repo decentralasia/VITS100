@@ -227,6 +227,11 @@ def export(config, checkpoint, voices_dir, output):
         audio = result[0]                      # [B, 1, T] — keep channel dim to match OLD vocoder output
         y_lengths = result[5].to(torch.int64)  # mel frame count (NOT audio samples)
 
+        # Zero out decoder noise beyond valid audio length
+        audio_lengths = y_lengths * HOP_LENGTH
+        mask = torch.arange(audio.shape[-1], device=audio.device) < audio_lengths.unsqueeze(-1)
+        audio = audio * mask.unsqueeze(1)      # [B, 1, T] * [B, 1, T]
+
         # Keep unused inputs in the ONNX graph so TensorRT doesn't prune them.
         # These are required by the Triton ensemble wiring (OLD reference compat).
         _unused = (input_ids_length.sum()
