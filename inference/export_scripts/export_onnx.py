@@ -208,7 +208,7 @@ def export(config, checkpoint, voices_dir, output):
 
         Outputs:
             raw_waveform: [B, 1, T_audio]  FP32  (fixed size = MAX_MEL_LENGTH * hop_length)
-            y_length:     [B]              INT64  (actual valid audio length in samples)
+            y_length:     [B]              INT64  (actual valid length in mel frames)
         """
         idx = lid.long() * N_SPEAKERS * N_TONES + sid.long() * N_TONES + tid.long()
         spec = net_g.ref_specs[idx]
@@ -225,8 +225,7 @@ def export(config, checkpoint, voices_dir, output):
             max_y_length=MAX_MEL_LENGTH,
         )
         audio = result[0]                      # [B, 1, T] — keep channel dim to match OLD vocoder output
-        y_lengths = result[5] * HOP_LENGTH  # convert mel frames → audio samples
-        y_lengths = y_lengths.to(torch.int64)
+        y_lengths = result[5].to(torch.int64)  # mel frame count (NOT audio samples)
 
         # Keep unused inputs in the ONNX graph so TensorRT doesn't prune them.
         # These are required by the Triton ensemble wiring (OLD reference compat).
