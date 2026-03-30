@@ -572,28 +572,29 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 y, y_lengths = y.cuda(), y_lengths.cuda()
                 sid, tid, lid = sid.cuda(), tid.cuda(), lid.cuda()
 
-                # Forward pass through the model to compute losses
-                y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
-                    x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
-                )
+                with autocast("cuda", enabled=hps.train.fp16_run):
+                    # Forward pass through the model to compute losses
+                    y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), _ = generator(
+                        x, x_lengths, spec, spec_lengths, emphasis, sid=sid, tid=tid, lid=lid
+                    )
 
-                mel = spec
+                    mel = spec
 
-                y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
-                y_hat_mel = mel_spectrogram_torch(
-                    y_hat.squeeze(1),
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.hop_length,
-                    hps.data.win_length,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax
-                )
+                    y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+                    y_hat_mel = mel_spectrogram_torch(
+                        y_hat.squeeze(1),
+                        hps.data.filter_length,
+                        hps.data.n_mel_channels,
+                        hps.data.sampling_rate,
+                        hps.data.hop_length,
+                        hps.data.win_length,
+                        hps.data.mel_fmin,
+                        hps.data.mel_fmax
+                    )
 
-                # Calculate losses
-                mel_loss = F.l1_loss(y_mel, y_hat_mel)
-                kl_loss_val = kl_loss(z_p, logs_q, m_p, logs_p, z_mask)
+                # Calculate losses in float32 for accuracy
+                mel_loss = F.l1_loss(y_mel.float(), y_hat_mel.float())
+                kl_loss_val = kl_loss(z_p.float(), logs_q.float(), m_p.float(), logs_p.float(), z_mask)
                 dur_loss = torch.sum(l_length.float())
 
                 # Accumulate losses
@@ -659,7 +660,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         spec_ref, _ = eval_loader.dataset.get_audio(ref_path)
         new_speaker_specs[name] = spec_ref.unsqueeze(0).to(device)
 
-    with torch.no_grad():
+    with torch.no_grad(), autocast("cuda", enabled=hps.train.fp16_run):
         audio_timur_ky = generator.infer(ky_text, spec=spec_ref_timur_ky, emphasis=is_highlighted_ky, sid=sid_0, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
         audio_timur_ru = generator.infer(ru_text, spec=spec_ref_timur_ru, emphasis=is_highlighted_ru, sid=sid_0, tid=tid, lid=lid_1)[0][0, 0].data.cpu().float().numpy()
         audio_aiganysh_ky = generator.infer(ky_text, spec=spec_ref_aiganysh_ky, emphasis=is_highlighted_ky, sid=sid_1, tid=tid, lid=lid_0)[0][0, 0].data.cpu().float().numpy()
