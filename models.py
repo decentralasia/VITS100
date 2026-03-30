@@ -1590,11 +1590,11 @@ class SynthesizerTrn(nn.Module):
 
         self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
         # Conditioning embeddings. Each produces a vector in R^{gin_channels}.
-        # self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
-        # self.emb_tone = nn.Embedding(n_tones, gin_channels)
-        # self.emb_language = nn.Embedding(n_languages, gin_channels)
-        # Project concatenated embeddings back to gin_channels
-        self.g_proj = nn.Conv1d(384, gin_channels, 1)
+        self.emb_speaker = nn.Embedding(n_speakers, gin_channels)
+        self.emb_tone = nn.Embedding(n_tones, gin_channels)
+        self.emb_language = nn.Embedding(n_languages, gin_channels)
+        # Project concatenated embeddings (ref_384 + spk_192 + tone_192 + lang_192 = 960) back to gin_channels
+        self.g_proj = nn.Conv1d(384 + 3 * gin_channels, gin_channels, 1)
 
 
     def _build_g(self, sid, tid, lid, reference_emb):
@@ -1631,7 +1631,7 @@ class SynthesizerTrn(nn.Module):
             sid: [B] - Speaker IDs
             tid: [B] - Tone IDs
             lid: [B] - Language IDs
-            reference_emb: [B, gin_channels] or [B, gin_channels, 1] - Reference encoder output
+            reference_emb: [B, 384] or [B, 384, 1] - Reference encoder output
 
         Returns:
             g: [B, gin_channels, 1] - Projected conditioning vector
@@ -1657,9 +1657,8 @@ class SynthesizerTrn(nn.Module):
         # Concatenate all available embeddings
         g_cat = torch.cat(embeddings, dim=1)  # [B, total_channels]
 
-        # Project to gin_channels
-        g = self.g_proj(g_cat)  # [B, gin_channels]
-        g = g.unsqueeze(-1)  # [B, gin_channels, 1]
+        # Project to gin_channels (Conv1d expects [B, C, L])
+        g = self.g_proj(g_cat.unsqueeze(-1))  # [B, gin_channels, 1]
         
         return g
 
@@ -1670,10 +1669,10 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, spec, spec_lengths, emphasis, sid=None, tid=None, lid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths)
 
-        # Use _build_g to combine speaker, tone, language, and reference embeddings
-        g = self._build_g_5(reference_emb=reference_emb)
+        # Use _build_g_3 to combine speaker, tone, language, and reference embeddings
+        g = self._build_g_3(sid, tid, lid, reference_emb)
 
         # Pass emphasis to enc_p - emphasis is added to token embeddings inside TextEncoder
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emphasis=emphasis, g=g)
@@ -1733,10 +1732,10 @@ class SynthesizerTrn(nn.Module):
 
     def infer(self, x, spec, emphasis, noise_scale=1., noise_scale_w=1., length_scale=1., sid=None, tid=None, lid=None, max_len=None, max_y_length=None, spec_lengths=None):
         x_lengths = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * x.shape[1]
-        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths).unsqueeze(-1)
+        reference_emb = self.ref_enc(spec, spec_lengths=spec_lengths)
 
-        # Use _build_g to combine speaker, tone, language, and reference embeddings
-        g = self._build_g_5(reference_emb=reference_emb)
+        # Use _build_g_3 to combine speaker, tone, language, and reference embeddings
+        g = self._build_g_3(sid, tid, lid, reference_emb)
 
         # Pass emphasis to enc_p - emphasis is added to token embeddings inside TextEncoder
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emphasis=emphasis, g=g)

@@ -295,6 +295,11 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
     if net_dur_disc is not None:  # vits2
         net_dur_disc.train()
 
+    # KL annealing parameters
+    c_kl_initial = getattr(hps.train, "c_kl_initial", hps.train.c_kl)
+    c_kl_final = getattr(hps.train, "c_kl_final", hps.train.c_kl)
+    c_kl_anneal_steps = getattr(hps.train, "c_kl_anneal_steps", 1000)
+
     # Initialize gradient norms for logging
     grad_norm_d = 0.0
     grad_norm_g = 0.0
@@ -371,7 +376,12 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
                 with autocast("cuda", enabled=False):
                     loss_dur = torch.sum(l_length.float())
                     loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                    loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
+                    # KL annealing: linearly increase c_kl from c_kl_initial to c_kl_final
+                    c_kl_current = min(
+                        c_kl_initial + (c_kl_final - c_kl_initial) * (global_step / max(c_kl_anneal_steps, 1)),
+                        c_kl_final
+                    )
+                    loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * c_kl_current
 
                     loss_fm = feature_loss(fmap_r, fmap_g)
                     loss_gen, losses_gen = generator_loss(y_d_hat_g)
@@ -467,6 +477,7 @@ def train_and_evaluate(epoch, hps, nets, optims, schedulers, scaler, loaders, lo
                     "train/loss_kl": get_scalar(loss_kl),
                     "train/loss_subband": get_scalar(loss_subband),
                     "train/learning_rate": lr,
+                    "train/c_kl_current": c_kl_current,
                     "train/grad_norm_d": grad_norm_d,
                     "train/grad_norm_g": grad_norm_g,
                     "train/epoch": epoch,
